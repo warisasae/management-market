@@ -1,0 +1,79 @@
+// prisma/schema.prisma
+// 1. Prisma Schema Example
+// รัน `npx prisma migrate dev --name init` หลังแก้ schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  user_id String   @id @default(uuid()) @map("user_id")
+  username String  @unique
+  password String
+  name     String
+  role     String
+  sales    Sale[]
+}
+
+model Category {
+  category_id String    @id @default(uuid()) @map("category_id")
+  category_name String
+  products     Product[]
+}
+
+model Product {
+  product_id String   @id @default(uuid()) @map("product_id")
+  product_name String
+  category_id String
+  barcode      String? @unique
+  cost_price   Float
+  sell_price   Float
+  unit         String
+  stock_qty    Int
+  category     Category @relation(fields: [category_id], references: [category_id])
+  sale_items   SaleItem[]
+  stock_transactions StockTransaction[]
+}
+
+model Sale {
+  sale_id String   @id @default(uuid()) @map("sale_id")
+  user_id String
+  sale_date DateTime @default(now())
+  total_amount Float
+  user     User     @relation(fields: [user_id], references: [user_id])
+  sale_items SaleItem[]
+}
+
+model SaleItem {
+  sale_item_id String  @id @default(uuid()) @map("sale_item_id")
+  sale_id String
+  product_id String
+  quantity Int
+  price    Float
+  subtotal Float
+  sale     Sale    @relation(fields: [sale_id], references: [sale_id])
+  product  Product @relation(fields: [product_id], references: [product_id])
+}
+
+model StockTransaction {
+  stock_id String   @id @default(uuid()) @map("stock_id")
+  product_id String
+  change_type String
+  quantity Int
+  note     String?
+  timestamp DateTime @default(now())
+  product   Product  @relation(fields: [product_id], references: [product_id])
+}
+
+model Expense {
+  expense_id String   @id @default(uuid()) @map("expense_id")
+  expense_name String
+  amount       Float
+  expense_date DateTime @default(now())
+  note         String?
+}
