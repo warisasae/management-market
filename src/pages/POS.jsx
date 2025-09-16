@@ -1,95 +1,128 @@
-// src/pages/CartPage.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 
-/** ตัวอย่างคลังสินค้า (คุณแก้ไข/ดึงจาก API ภายหลังได้)
- *  ใช้ key "barcode" เพื่อตรวจจับจาก input/เครื่องสแกน
- */
-const PRODUCTS = [
-  { id: "p001", barcode: "8850001112223", name: "ผัดซีอิ๊วเส้นใหญ่", price: 50 },
-  { id: "p002", barcode: "8850001112224", name: "ชาไทยเย็น", price: 35 },
-  { id: "p003", barcode: "8850001112225", name: "โค้กกระป๋อง", price: 20 },
-  { id: "p004", barcode: "8850001112226", name: "ข้าวกะเพราไข่ดาว", price: 65 },
-];
-
-export default function CartPage() {
-  const [items, setItems] = useState([]);
-  const [query, setQuery] = useState("");       // เก็บค่าที่พิมพ์/สแกน (barcode หรือชื่อ)
-  const [hint, setHint] = useState("");         // แสดงข้อความแจ้งเตือนสั้นๆ
+export default function POS() {
+  // ============== state ==============
+  const [items, setItems] = useState([]); // [{ product_id, product_name, sell_price, qty }]
+  const [query, setQuery] = useState("");
+  const [hint, setHint] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [vatRate, setVatRate] = useState(0);
   const inputRef = useRef(null);
+  const navigate = useNavigate();
 
+  // ============== derive ==============
   const total = useMemo(
-    () => items.reduce((s, it) => s + it.price * it.qty, 0),
+    () => items.reduce((s, it) => s + Number(it.sell_price) * it.qty, 0),
     [items]
   );
 
-  // โฟกัสช่องค้นหาให้พร้อมสแกนเสมอ
+  // โฟกัสช่องสแกนเมื่อเข้าหน้า
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const resetCart = () => setItems([]);
+  // โหลด VAT จาก backend (หรือ fallback localStorage)
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get("/settings/vat", { validateStatus: s => s >= 200 && s < 500 });
+        if (r.status === 200 && r.data?.value != null) {
+          setVatRate(Number(r.data.value) || 0);
+          return;
+        }
+      } catch {}
+      const raw = localStorage.getItem("VAT_RATE");
+      setVatRate(Number(raw) || 0);
+    })();
+  }, []);
 
-  const checkout = () => {
-    if (items.length === 0) return;
-    alert("ไปหน้าชำระเงิน");
-  };
-
-  /** เพิ่มสินค้าจาก object สินค้า 1 ชิ้น (รวมจำนวนถ้ามีอยู่แล้ว) */
+  // ============== cart ops ==============
   const addItem = (prod, qty = 1) => {
+    qty = Math.max(1, Number(qty) || 1);
     setItems((cur) => {
-      const idx = cur.findIndex((x) => x.id === prod.id);
+      const idx = cur.findIndex((x) => x.product_id === prod.product_id);
       if (idx !== -1) {
         const copy = [...cur];
         copy[idx] = { ...copy[idx], qty: copy[idx].qty + qty };
         return copy;
       }
-      return [...cur, { ...prod, qty }];
+      return [
+        ...cur,
+        {
+          product_id: prod.product_id,
+          product_name: prod.product_name,
+          sell_price: Number(prod.sell_price),
+          qty,
+        },
+      ];
     });
   };
 
-  /** ลบสินค้าออกทั้งแถว */
-  const removeItem = (id) => {
-    setItems((cur) => cur.filter((x) => x.id !== id));
-  };
+  const removeItem = (product_id) =>
+    setItems((cur) => cur.filter((x) => x.product_id !== product_id));
 
-  /** เปลี่ยนจำนวนแบบ +/- */
-  const changeQty = (id, delta) => {
+  const changeQty = (product_id, delta) => {
     setItems((cur) =>
       cur
-        .map((x) => (x.id === id ? { ...x, qty: Math.max(1, x.qty + delta) } : x))
+        .map((x) =>
+          x.product_id === product_id
+            ? { ...x, qty: Math.max(1, x.qty + delta) }
+            : x
+        )
         .filter((x) => x.qty > 0)
     );
   };
 
-  /** ค้นหาและเพิ่มด้วย barcode (หรือชื่อก็ได้) */
-  const addByQuery = (raw) => {
-    const q = raw.trim();
-    if (!q) return;
+  // ---------- helper: แยกจำนวน*บาร์โค้ด ----------
+  // รองรับรูปแบบ:
+  //  - "5*CODE", "5xCODE"
+  //  - "CODE*5", "CODEx5"
+  // ไม่เจอรูปแบบ => ถือเป็น qty=1, code=input
+  function parseQtyAndCode(input) {
+    const s = String(input || "").trim();
+    if (!s) return { qty: 1, code: "" };
 
-    // 1) ลองหาด้วย barcode ตรงๆ ก่อน
-    let prod = PRODUCTS.find((p) => p.barcode === q);
+    // qty ก่อน code
+    let m = s.match(/^(\d+)\s*[*xX]\s*(.+)$/);
+    if (m) return { qty: Math.max(1, parseInt(m[1], 10) || 1), code: m[2].trim() };
 
-    // 2) ถ้าไม่เจอ ลองหาแบบชื่อ (เช่นพิมพ์ "โค้ก")
-    if (!prod) {
-      const lower = q.toLowerCase();
-      prod = PRODUCTS.find((p) => p.name.toLowerCase().includes(lower));
+    // code ก่อน qty
+    m = s.match(/^(.+)\s*[*xX]\s*(\d+)$/);
+    if (m) return { qty: Math.max(1, parseInt(m[2], 10) || 1), code: m[1].trim() };
+
+    return { qty: 1, code: s };
+  }
+
+  // ============== search by barcode ==============
+  async function addByQuery(raw) {
+    const { qty, code } = parseQtyAndCode(raw);
+    if (!code) return;
+
+    setLoading(true);
+    try {
+      const res = await api.get(`/products/barcode/${encodeURIComponent(code)}`, {
+        validateStatus: (s) => (s >= 200 && s < 300) || s === 404,
+      });
+
+      if (res.status === 200 && res.data) {
+        addItem(res.data, qty);
+        setHint(`เพิ่ม "${res.data.product_name}" จำนวน ${qty} ชิ้นแล้ว`);
+      } else {
+        setHint("ไม่พบสินค้าในระบบ");
+      }
+    } catch (e) {
+      console.error(e);
+      setHint("เกิดข้อผิดพลาดในการค้นหา");
+    } finally {
+      setLoading(false);
+      setQuery("");
+      inputRef.current?.focus();
     }
+  }
 
-    if (prod) {
-      addItem(prod, 1);
-      setHint(`เพิ่ม "${prod.name}" แล้ว`);
-    } else {
-      setHint("ไม่พบสินค้า");
-    }
-
-    setQuery("");
-    inputRef.current?.focus();
-  };
-
-  /** เมื่อกดปุ่มไอคอนค้นหา */
   const onClickSearch = () => addByQuery(query);
-
-  /** รองรับเครื่องสแกนบาร์โค้ดที่กดยิงแล้วลงท้ายด้วย Enter */
   const onKeyDown = (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -97,56 +130,66 @@ export default function CartPage() {
     }
   };
 
+  // ============== go to checkout ==============
+  function goCheckout() {
+    if (!items.length) return;
+
+    const payload = {
+      vatRate,
+      items: items.map((it) => ({
+        id: it.product_id,
+        name: it.product_name,
+        qty: it.qty,
+        price: Number(it.sell_price),
+      })),
+    };
+
+    sessionStorage.setItem("mm_checkout", JSON.stringify(payload));
+    navigate("/dashboard/pos/checkout");
+  }
+
   return (
-    <div className="min-h-screen p-4 sm:p-6 bg-gray-50">
+    <div className="min-h-screen p-4 sm:p-6 ">
+      <h1 className="text-2xl font-extrabold mb-4">ระบบหน้าร้าน (POS)</h1>
+
       {/* Search bar */}
       <div className="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 px-4 py-3 flex items-center gap-3">
-        <button className="p-2 rounded-lg hover:bg-gray-100" aria-label="menu">
-          <svg className="w-5 h-5 text-gray-500" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3 6h18v2H3M3 11h18v2H3M3 16h18v2H3" />
-          </svg>
-        </button>
-
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="ค้นหาสินค้าด้วยคิวอาร์โค้ด….."
+          placeholder={
+            loading
+              ? "กำลังค้นหา..."
+              : "สแกนบาร์โค้ด / พิมพ์ชื่อสินค้า หรือพิมพ์ 5*บาร์โค้ด เพื่อเพิ่มทีละหลายชิ้น แล้วกด Enter"
+          }
           className="flex-1 text-sm outline-none placeholder:text-gray-400"
+          disabled={loading}
         />
-
         <button
           onClick={onClickSearch}
           className="p-2 rounded-lg hover:bg-gray-100"
           aria-label="search"
         >
-          <svg
-            className="w-5 h-5 text-indigo-600"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
+          <svg className="w-5 h-5 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="7" />
             <path d="m21 21-4.3-4.3" />
           </svg>
         </button>
       </div>
 
-      {/* hint/แจ้งเตือนสั้นๆ */}
       {hint && (
         <div className="mt-2 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg">
           {hint}
         </div>
       )}
 
-      {/* กล่องตะกร้า */}
+      {/* Cart */}
       <div className="mt-4 bg-white rounded-2xl shadow-sm ring-1 ring-black/5 p-4 sm:p-6">
         <h3 className="font-extrabold text-lg sm:text-xl text-gray-900 mb-3">ตะกร้าสินค้า</h3>
 
-        {/* หัวตาราง */}
         <div className="rounded-lg overflow-hidden ring-1 ring-[#C80036]/20">
           <div className="bg-[#C80036] text-white grid grid-cols-[1fr_110px_110px_130px_80px] px-4 py-2 text-sm font-semibold">
             <div>สินค้า</div>
@@ -156,44 +199,41 @@ export default function CartPage() {
             <div className="text-center">ลบ</div>
           </div>
 
-          {/* รายการ */}
           {items.length === 0 ? (
-            <div className="h-28 grid place-items-center text-gray-400 bg-white">
-              ไม่มีข้อมูล
-            </div>
+            <div className="h-28 grid place-items-center text-gray-400 bg-white">ไม่มีข้อมูล</div>
           ) : (
             <ul className="bg-white">
               {items.map((it) => (
                 <li
-                  key={it.id}
+                  key={it.product_id}
                   className="grid grid-cols-[1fr_110px_110px_130px_80px] px-4 py-3 text-sm odd:bg-white even:bg-gray-50"
                 >
-                  <div className="text-gray-900">{it.name}</div>
+                  <div className="text-gray-900">{it.product_name}</div>
 
                   <div className="text-center flex items-center justify-center gap-2">
                     <button
-                      onClick={() => changeQty(it.id, -1)}
+                      onClick={() => changeQty(it.product_id, -1)}
                       className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300"
                     >
                       -
                     </button>
                     <span className="w-8 text-center">{it.qty}</span>
                     <button
-                      onClick={() => changeQty(it.id, +1)}
+                      onClick={() => changeQty(it.product_id, +1)}
                       className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300"
                     >
                       +
                     </button>
                   </div>
 
-                  <div className="text-center">฿ {it.price.toLocaleString()}</div>
+                  <div className="text-center">฿ {Number(it.sell_price).toLocaleString()}</div>
                   <div className="text-center font-semibold">
-                    ฿ {(it.price * it.qty).toLocaleString()}
+                    ฿ {(Number(it.sell_price) * it.qty).toLocaleString()}
                   </div>
 
                   <div className="text-center">
                     <button
-                      onClick={() => removeItem(it.id)}
+                      onClick={() => removeItem(it.product_id)}
                       className="px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100"
                     >
                       ลบ
@@ -205,44 +245,26 @@ export default function CartPage() {
           )}
         </div>
 
-        {/* สรุป + ปุ่ม */}
         <div className="mt-4 flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="text-lg sm:text-xl font-extrabold text-gray-900">
             รวมทั้งหมด : <span>฿ {total.toLocaleString()}</span>
           </div>
           <div className="flex gap-3">
             <button
-              onClick={resetCart}
+              onClick={() => setItems([])}
               disabled={items.length === 0}
               className="px-4 py-2 rounded-lg bg-gray-200 text-gray-800 font-semibold shadow-sm hover:bg-gray-300 disabled:opacity-50"
             >
               เริ่มต้นใหม่
             </button>
             <button
-              onClick={checkout}
+              onClick={goCheckout}
               disabled={items.length === 0}
               className="px-5 py-2 rounded-lg bg-green-600 text-white font-semibold shadow-sm hover:bg-green-700 disabled:opacity-50"
             >
               ชำระเงิน
             </button>
           </div>
-        </div>
-      </div>
-
-      {/* ตัวอย่างรายการด่วน: คลิกเพื่อทดสอบเร็ว (ไม่จำเป็นต้องมีในโปรดักชัน) */}
-      <div className="mt-4 text-sm text-gray-600">
-        <div className="mb-2 font-semibold">ทดสอบเร็ว:</div>
-        <div className="flex flex-wrap gap-2">
-          {PRODUCTS.map((p) => (
-            <button
-              key={p.id}
-              onClick={() => addItem(p)}
-              className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-              title={`barcode: ${p.barcode}`}
-            >
-              + {p.name}
-            </button>
-          ))}
         </div>
       </div>
     </div>

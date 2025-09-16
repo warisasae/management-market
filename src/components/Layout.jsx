@@ -1,8 +1,45 @@
-// src/components/Layout.jsx 
-import Sidebar from './Sidebar';
-import { Outlet } from 'react-router-dom';
+// src/components/Layout.jsx
+import Sidebar from "./Sidebar";
+import { Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
+
+function readAuth() {
+  try {
+    return JSON.parse(localStorage.getItem("mm_auth") || "null");
+  } catch {
+    return null;
+  }
+}
+
+// helper ใช้ร่วมกัน
+function resolveUrl(u) {
+  const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
+  if (!u) return "";
+  return u.startsWith("http") ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`;
+}
 
 const Layout = () => {
+  const [auth, setAuth] = useState(() => readAuth());
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key === "mm_auth") {
+        setAuth(readAuth());
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const me = auth?.user || auth || {};
+  const name = me?.name || me?.username || "ผู้ใช้";
+  const rawImage = me?.image_url || "";
+
+  const profileImage = resolveUrl(rawImage);
+
   return (
     <div className="h-screen flex flex-col font-sans">
       {/* Topbar */}
@@ -15,10 +52,11 @@ const Layout = () => {
             🟢 ใช้งาน
           </p>
 
-          {/* ปุ่มตั้งค่า */}
+          {/* ปุ่มตั้งค่า → ไปหน้าแก้ไขโปรไฟล์ */}
           <button
-            onClick={() => alert("ไปหน้าตั้งค่า")}
+            onClick={() => navigate("/dashboard/profile/edit")}
             className="p-2 rounded-full hover:bg-white/20 transition"
+            title="แก้ไขโปรไฟล์ของฉัน"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -38,18 +76,26 @@ const Layout = () => {
           </button>
 
           {/* รูปโปรไฟล์ */}
-          <img
-            src="ใส่รูปจ้าเบบี้"
-            alt="Profile"
-            className="w-10 h-10 rounded-full border border-blue-400"
-          />
+          {profileImage ? (
+            <img
+              src={profileImage}
+              alt={name}
+              className="w-10 h-10 rounded-full border border-blue-400 object-cover"
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-white/20 grid place-items-center text-white font-bold border border-blue-400">
+              {name.charAt(0).toUpperCase()}
+            </div>
+          )}
         </div>
       </header>
 
       {/* Sidebar + Main */}
       <div className="flex flex-1">
         <Sidebar />
-        {/* ✅ เปลี่ยนพื้นหลังเป็นสี #FFF5E1 */}
         <main className="flex-1 bg-[#FFF5E1] p-8 overflow-y-auto">
           <Outlet />
         </main>

@@ -1,9 +1,18 @@
 import { Router } from 'express';
-import { createSale, getAllSales, getSale } from '../controllers/saleController.js';
+import { createSale, listSales, getSale, listSalesWithItems } from '../controllers/saleController.js';
 
 const router = Router();
-router.post('/', createSale);
-router.get('/', getAllSales);
+
+// ✅ เจาะจงก่อน
+router.get('/with-items', listSalesWithItems);
+
+// รายการทั้งหมด
+router.get('/', listSales);
+
+// ตาม id (ประกาศหลังสุด)
 router.get('/:id', getSale);
+
+// สร้างรายการขาย
+router.post('/', createSale);
 
 export default router;

@@ -12,53 +12,75 @@ datasource db {
 }
 
 model User {
-  user_id String   @id @default(uuid()) @map("user_id")
+  user_id  String  @id @default(uuid()) @map("user_id")
   username String  @unique
   password String
   name     String
   role     String
+  image_url String?   // 👈 เพิ่มฟิลด์เก็บลิงก์รูป (optional)
   sales    Sale[]
+  stock_changes StockTransaction[]
 }
 
+
 model Category {
-  category_id String    @id @default(uuid()) @map("category_id")
-  category_name String
-  products     Product[]
+  category_id   String   @id             // ❌ ตัด @default(uuid()) ทิ้ง
+  category_name String   @unique         // ✅ กันชื่อซ้ำได้
+  products      Product[]
+}
+
+enum ProductStatus {
+  AVAILABLE      // มีจำหน่าย
+  OUT_OF_STOCK   // สินค้าหมด แต่ยัง active
+  UNAVAILABLE    // เลิกขายแล้ว
 }
 
 model Product {
-  product_id String   @id @default(uuid()) @map("product_id")
+  product_id   String   @id
   product_name String
-  category_id String
-  barcode      String? @unique
+  category_id  String
+  barcode      String?  @unique
   cost_price   Float
   sell_price   Float
   unit         String
-  stock_qty    Int
+  stock_qty    Int      @default(0)
+  status       ProductStatus @default(AVAILABLE)
+
   category     Category @relation(fields: [category_id], references: [category_id])
   sale_items   SaleItem[]
   stock_transactions StockTransaction[]
 }
 
+
 model Sale {
-  sale_id String   @id @default(uuid()) @map("sale_id")
-  user_id String
-  sale_date DateTime @default(now())
-  total_amount Float
-  user     User     @relation(fields: [user_id], references: [user_id])
-  sale_items SaleItem[]
+  sale_id        String   @id
+  user_id        String?
+  user           User?    @relation(fields: [user_id], references: [user_id])
+  payment_method String   @default("เงินสด")
+  cash_received  Float?
+  vat_rate       Float    @default(0)
+  sub_total      Float    @default(0)
+  vat_amount     Float    @default(0)
+  grand_total    Float    @default(0)
+
+  // ✅ เก็บเป็น timestamptz (UTC) จะนิ่งที่สุด
+  created_at     DateTime @db.Timestamptz(6) @default(now())
+
+  items          SaleItem[]
 }
 
+
 model SaleItem {
-  sale_item_id String  @id @default(uuid()) @map("sale_item_id")
-  sale_id String
-  product_id String
-  quantity Int
-  price    Float
-  subtotal Float
-  sale     Sale    @relation(fields: [sale_id], references: [sale_id])
-  product  Product @relation(fields: [product_id], references: [product_id])
+  sale_item_id String  @id @default(cuid())   // ✅ ให้ Prisma gen id ให้อัตโนมัติ
+  sale_id      String
+  sale         Sale    @relation(fields: [sale_id], references: [sale_id])
+  product_id   String
+  product      Product @relation(fields: [product_id], references: [product_id])
+  quantity     Int
+  price        Float
+  total        Float   @default(0)
 }
+
 
 model StockTransaction {
   stock_id String   @id @default(uuid()) @map("stock_id")
@@ -67,7 +89,11 @@ model StockTransaction {
   quantity Int
   note     String?
   timestamp DateTime @default(now())
-  product   Product  @relation(fields: [product_id], references: [product_id])
+   // ⭐ เก็บว่าใครทำ
+  user_id     String?  @map("user_id")
+  user        User?    @relation(fields: [user_id], references: [user_id])
+
+  product     Product  @relation(fields: [product_id], references: [product_id])
 }
 
 model Expense {
@@ -77,3 +103,10 @@ model Expense {
   expense_date DateTime @default(now())
   note         String?
 }
+
+model Setting {
+  id    Int    @id @default(autoincrement())
+  key   String @unique
+  value String
+}
+

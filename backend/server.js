@@ -1,5 +1,8 @@
+//server.js
 import 'dotenv/config';
-import app from './app.js';   // <- อยู่โฟลเดอร์เดียวกันกับ server.js
+import app from './app.js';
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server listening on http://localhost:${PORT}`);
+});

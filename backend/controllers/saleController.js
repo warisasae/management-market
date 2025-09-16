@@ -1,81 +1,206 @@
+// controllers/salesController.js
 import { prisma } from '../config/prisma.js';
 import { genId } from '../utils/id.js';
 
-// POST /api/sales
+const asNum = (v, name) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`${name} must be a number`);
+  return n;
+};
+
 export async function createSale(req, res, next) {
-  const { user_id, items } = req.body; // items: [{ product_id, quantity, price? }, ...]
-  if (!user_id || !Array.isArray(items) || items.length === 0)
-    return next(new Error('user_id and items[] are required'));
-
   try {
-    const sale = await prisma.$transaction(async (tx) => {
-      const sale_id = await genId({ client: tx, model: 'sales', field: 'sale_id', prefix: 'SA' });
-      await tx.sales.create({ data: { sale_id, user_id, total_amount: '0' } });
+    const {
+      items = [],
+      user_id: bodyUserId,
+      payment_method,
+      cash_received,
+      vat_rate = 0,   // % (เช่น 7 = 7%)
+    } = req.body;
 
-      let total = 0;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "items required" });
+    }
 
-      for (const [i, it] of items.entries()) {
-        if (!it.product_id || !it.quantity)
-          throw new Error(`items[${i}] missing product_id or quantity`);
+    const actorId = req.user?.user_id || bodyUserId || null;
 
-        const prod = await tx.products.findUnique({ where: { product_id: it.product_id } });
-        if (!prod) throw new Error(`product not found: ${it.product_id}`);
+    // 👉 คำนวณยอดจาก items เองเสมอ
+    const sub_total_calc = items.reduce((sum, it) => {
+      const qty = Number(it.quantity) || 0;
+      const price = Number(it.price) || 0;
+      return sum + qty * price;
+    }, 0);
 
-        const qty = Number(it.quantity);
-        if (qty <= 0) throw new Error('quantity must be > 0');
+    const vat_amount_calc   = +(sub_total_calc * (Number(vat_rate) / 100)).toFixed(2);
+    const grand_total_calc  = +(sub_total_calc + vat_amount_calc).toFixed(2);
 
-        const price = it.price != null ? Number(it.price) : Number(prod.sell_price);
-        const newQty = prod.stock_qty - qty;
-        if (newQty < 0) throw new Error(`Insufficient stock for ${prod.product_id}`);
+    const sale_id = await prisma.$transaction(async (tx) => {
+      // 1) สร้างหัวบิลด้วยยอดที่คำนวณแล้ว
+      await tx.sale.create({
+        data: {
+          sale_id: await genId({
+            client: tx,
+            model: "sale",
+            field: "sale_id",
+            prefix: "SL",
+            pad: 5,
+          }),
+          user_id: actorId,
+          payment_method,
+          cash_received,
+          vat_rate: Number(vat_rate) || 0,
+          sub_total: sub_total_calc,
+          vat_amount: vat_amount_calc,
+          grand_total: grand_total_calc,
+        },
+      });
 
-        const sale_item_id = await genId({ client: tx, model: 'sale_items', field: 'sale_item_id', prefix: 'SI' });
-        const subtotal = price * qty;
-        total += subtotal;
+      // อ่าน sale_id ที่เพิ่ง gen (หรือคุณจะเก็บไว้จาก genId ก็ได้)
+      // แต่ในที่นี้เราใช้ค่าเดียวกับที่ส่งตอนสร้าง เพื่อความชัดเจน ดึงจากบิลล่าสุดที่ user นี้สร้างก็ได้
+      // ง่ายสุด: สร้างก่อนแล้ว "จำค่า" จาก genId
+      const created = await tx.sale.findFirst({
+        orderBy: { created_at: 'desc' },
+        select: { sale_id: true },
+      });
+      const sid = created.sale_id;
 
-        await tx.sale_items.create({
+      // 2) ลูปสร้างรายการ + บันทึก total ของรายการ + ตัดสต๊อก + สร้าง stockTransaction
+      for (const it of items) {
+        const qty   = Number(it.quantity) || 0;
+        const price = Number(it.price) || 0;
+        const lineTotal = +(qty * price).toFixed(2);
+
+        await tx.saleItem.create({
           data: {
-            sale_item_id,
-            sale_id,
-            product_id: prod.product_id,
+            sale_id: sid,
+            product_id: it.product_id,
             quantity: qty,
-            price: String(price.toFixed(2)),
-            subtotal: String(subtotal.toFixed(2))
-          }
+            price,
+            total: lineTotal,       // ✅ บันทึกยอดรวมของบรรทัด
+          },
         });
 
-        await tx.products.update({ where: { product_id: prod.product_id }, data: { stock_qty: newQty } });
+        // ตัดสต๊อก
+        const prod = await tx.product.findUnique({
+          where: { product_id: it.product_id },
+          select: { stock_qty: true, status: true },
+        });
+        if (!prod) throw new Error("product_not_found");
+        if (prod.stock_qty - qty < 0) throw new Error("insufficient_stock");
+
+        const newQty = prod.stock_qty - qty;
+        const newStatus = newQty <= 0 ? "OUT_OF_STOCK" : "AVAILABLE";
+        await tx.product.update({
+          where: { product_id: it.product_id },
+          data: { stock_qty: newQty, status: newStatus },
+        });
+
+        // ประวัติสต๊อก (OUT)
+        await tx.stockTransaction.create({
+          data: {
+            stock_id: await genId({
+              client: tx,
+              model: "stockTransaction",
+              field: "stock_id",
+              prefix: "ST",
+              pad: 3,
+            }),
+            product_id: it.product_id,
+            change_type: "OUT",
+            quantity: -Math.abs(qty),
+            note: `sale ${sid}`,
+            user_id: actorId,
+          },
+        });
       }
 
-      return tx.sales.update({
-        where: { sale_id },
-        data: { total_amount: String(total.toFixed(2)) },
-        include: { items: true, user: true }
-      });
+      return created.sale_id;
     });
 
-    res.status(201).json(sale);
-  } catch (e) { next(e); }
+    // ส่งกลับพร้อมข้อมูล user
+    const full = await prisma.sale.findUnique({
+      where: { sale_id },
+      include: { user: { select: { user_id: true, username: true, name: true } } },
+    });
+
+    res.status(201).json(full);
+  } catch (e) {
+    if (e.message === "product_not_found") {
+      return res.status(404).json({ error: "product not found" });
+    }
+    if (e.message === "insufficient_stock") {
+      return res.status(400).json({ error: "Not enough stock" });
+    }
+    next(e);
+  }
 }
 
-// GET /api/sales
-export async function getAllSales(req, res, next) {
+// GET /api/sales  — ดูรายการขายล่าสุด
+export async function listSales(req, res, next) {
   try {
-    const rows = await prisma.sales.findMany({
-      orderBy: { sale_date: 'desc' },
-      include: { items: true, user: true }
+    const rows = await prisma.sale.findMany({
+      orderBy: { created_at: 'desc' },   // ✅ เปลี่ยนจาก sale_date → created_at
+      take: 100,
+      include: { user: true }
     });
     res.json(rows);
   } catch (e) { next(e); }
 }
 
-// GET /api/sales/:id
+// GET /api/sales/:id — ดูบิลขาย + ไอเท็ม (แก้ให้ไม่ select field ที่ไม่มี)
 export async function getSale(req, res, next) {
   try {
-    const row = await prisma.sales.findUnique({
+    const sale = await prisma.sale.findUnique({
       where: { sale_id: req.params.id },
-      include: { items: true, user: true }
+      include: {
+        user: { select: { user_id: true, username: true, name: true } },
+        items: {
+          include: {
+            product: true,   // ✅ เอามาทั้ง object ป้องกัน select ฟิลด์ผิด
+          },
+        },
+      },
     });
-    if (!row) return res.status(404).json({ error: 'sale not found' });
-    res.json(row);
+
+    if (!sale) return res.status(404).json({ error: "sale not found" });
+    res.json(sale);
   } catch (e) { next(e); }
+}
+
+// controllers/saleController.js
+export async function listSalesWithItems(req, res, next) {
+  try {
+    const sales = await prisma.sale.findMany({
+  orderBy: { created_at: 'desc' },
+  select: {
+    sale_id: true,
+    created_at: true,
+    grand_total: true,
+    items: {
+      select: {
+        sale_item_id: true,
+        price: true,
+        quantity: true,   // ✅ ใช้อันนี้แทน
+        total: true,
+        product: {
+          select: {
+            product_id: true,
+            product_name: true,
+            unit: true,
+            barcode: true,
+            sell_price: true,
+            cost_price: true,
+            category: { select: { category_name: true } }
+          }
+        }
+      }
+    }
+  }
+});
+
+    res.json(sales);
+  } catch (err) {
+    console.error('Error fetching sales data:', err);
+    res.status(500).json({ error: err.message });
+  }
 }

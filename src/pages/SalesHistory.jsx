@@ -1,116 +1,154 @@
 // src/pages/SalesHistory.jsx
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { api } from "../lib/api";
 
-const mockData = [
-  {
-    id: 1,
-    date: "2025-07-17",
-    invoice: "#INV-00123",
-    total: 75,
-    payment: "เงินสด",
-  },
-  {
-    id: 2,
-    date: "2025-07-17",
-    invoice: "#INV-00122",
-    total: 350,
-    payment: "พร้อมเพย์",
-  },
-];
+const THB = (n) =>
+  (Number(n) || 0).toLocaleString("th-TH", {
+    style: "currency",
+    currency: "THB",
+  });
+
+// แปลงวันที่จาก created_at → yyyy-mm-dd (เทียบกับ input[type=date] ได้)
+const toDateInput = (v) => {
+  if (!v) return "";
+  try {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) return String(v).slice(0, 10);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 10);
+  } catch {
+    return String(v).slice(0, 10);
+  }
+};
 
 export default function SalesHistory() {
   const [q, setQ] = useState("");
   const [date, setDate] = useState("");
   const [payment, setPayment] = useState("");
-  const [sales] = useState(mockData);
+  const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(false);
 
+  // โหลดข้อมูลประวัติการขายจาก backend
+  useEffect(() => {
+    (async () => {
+      try {
+        setLoading(true);
+        // ✅ baseURL = /api แล้ว ใช้ path แค่ /sales
+        const res = await api.get("/sales");
+        setSales(res.data || []);
+      } catch (err) {
+        console.error("โหลดประวัติการขายล้มเหลว", err);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // filter ข้อมูล
   const filtered = useMemo(() => {
     return sales.filter((s) => {
-      const matchQ =
-        !q ||
-        s.invoice.toLowerCase().includes(q.toLowerCase()) ||
-        String(s.id).includes(q);
-      const matchDate = !date || s.date === date;
-      const matchPayment = !payment || s.payment === payment;
+      const saleId = String(s.sale_id || "");
+      const createdAt = toDateInput(s.created_at); // yyyy-mm-dd
+      const pm = s.payment_method || "";
+
+      const matchQ = !q || saleId.toLowerCase().includes(q.toLowerCase());
+      const matchDate = !date || createdAt === date;
+      const matchPayment = !payment || pm === payment;
+
       return matchQ && matchDate && matchPayment;
     });
   }, [q, date, payment, sales]);
 
-  const th = "px-4 py-3 font-semibold";
-  const td = "px-4 py-3";
+  const resetFilters = () => {
+    setQ("");
+    setDate("");
+    setPayment("");
+  };
 
   return (
-    <div className="min-h-screen bg-[#FAF1E6] p-6">
+    <div className="min-h-screen p-6">
       <h1 className="text-2xl font-extrabold mb-4">ประวัติการขาย</h1>
 
-      {/* Search Filters */}
-      <div>
-  <input
-    value={q}
-    onChange={(e) => setQ(e.target.value)}
-    placeholder="ค้นหาชื่อหมายเลขใบเสร็จ"
-    className="h-11 px-3 border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-  />
+      {/* ฟิลเตอร์ */}
+      <div className="bg-white rounded-xl shadow p-4 mb-6 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="ค้นหาเลขบิลหรือรหัส"
+          className="h-11 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="h-11 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        <select
+          value={payment}
+          onChange={(e) => setPayment(e.target.value)}
+          className="h-11 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+        >
+          <option value="">วิธีชำระเงิน (ทั้งหมด)</option>
+          <option value="เงินสด">เงินสด</option>
+          <option value="โอนเงิน">โอนเงิน</option>
+        </select>
+        <button
+          onClick={resetFilters}
+          className="h-11 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold"
+        >
+          ล้างตัวกรอง
+        </button>
+      </div>
 
-  <input
-    type="date"
-    value={date}
-    onChange={(e) => setDate(e.target.value)}
-    className="h-11 px-3 border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-  />
-
-  <select
-    value={payment}
-    onChange={(e) => setPayment(e.target.value)}
-    className="h-11 px-3 border border-gray-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-indigo-500"
-  >
-    <option value="">ชำระเงิน</option>
-    <option value="เงินสด">เงินสด</option>
-    <option value="พร้อมเพย์">พร้อมเพย์</option>
-  </select>
-
-  <button className="h-11 px-5 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700">
-    ค้นหา
-  </button>
-</div>
-
-      {/* Table */}
-      <div className="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 overflow-hidden">
-        <table className="w-full text-sm border-separate border-spacing-0">
-          <thead>
-            <tr className="bg-[#C80036] text-white">
-              <th className={`${th} text-left`}>ลำดับ</th>
-              <th className={`${th} text-left`}>วันที่</th>
-              <th className={`${th} text-left`}>เลขที่ใบเสร็จ</th>
-              <th className={`${th} text-right`}>ยอดรวม</th>
-              <th className={`${th} text-left`}>ช่องทางชำระ</th>
-              <th className={`${th} text-left`}>จัดการ</th>
+      {/* ตาราง */}
+      <div className="bg-white rounded-xl shadow overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-[#C80036] text-white">
+            <tr>
+              <th className="px-4 py-3 text-left">วันที่</th>
+              <th className="px-4 py-3 text-left">เลขบิล</th>
+              <th className="px-4 py-3 text-right">ยอดรวม</th>
+              <th className="px-4 py-3 text-center">วิธีชำระเงิน</th>
+              <th className="px-4 py-3 text-center">รายละเอียด</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((s, i) => (
-              <tr
-                key={s.id}
-                className="odd:bg-white even:bg-gray-50 hover:bg-gray-100/70 transition-colors"
-              >
-                <td className={td}>{i + 1}</td>
-                <td className={td}>{s.date}</td>
-                <td className={td}>{s.invoice}</td>
-                <td className={`${td} text-right`}>{s.total}</td>
-                <td className={td}>{s.payment}</td>
-                <td className={td}>
-                  <button className="px-3 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700">
-                    ดูรายละเอียด
-                  </button>
+            {loading ? (
+              <tr>
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
+                  กำลังโหลด...
                 </td>
               </tr>
-            ))}
-            {filtered.length === 0 && (
+            ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-400">
+                <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
                   ไม่พบข้อมูล
                 </td>
               </tr>
+            ) : (
+              filtered.map((s) => (
+                <tr
+                  key={s.sale_id}
+                  className="odd:bg-white even:bg-gray-50 hover:bg-gray-100"
+                >
+                  <td className="px-4 py-3">{toDateInput(s.created_at)}</td>
+                  <td className="px-4 py-3">{s.sale_id}</td>
+                  <td className="px-4 py-3 text-right">{THB(s.grand_total)}</td>
+                  <td className="px-4 py-3 text-center">
+                    {s.payment_method || "-"}
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <Link
+                      to={`/dashboard/saleshistory/${s.sale_id}`}
+                      className="text-indigo-600 hover:underline"
+                    >
+                      ดู
+                    </Link>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>
