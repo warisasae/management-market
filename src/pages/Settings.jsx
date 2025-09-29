@@ -1,422 +1,591 @@
-// src/pages/Settings.jsx
-import { useEffect, useRef, useState } from "react";
-import { api } from "../lib/api";
+import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  Database,
+  Upload,
+  Download,
+  Store,
+  ReceiptText,
+  Boxes,
+  MonitorCog,
+  ShieldCheck
+} from "lucide-react";
 
-const LS_KEY = "mm_settings"; // fallback key
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
 
-const DEFAULTS = {
-  shopName: "",
-  logo: "",      // dataURL ของโลโก้
-  currency: "",
-  vat: "",       // เก็บเป็น string ใน form แต่จะส่งเป็น number
-  language: "",
-};
+// แปลงเป็นค่าเงินไทย
+const THB = (n) =>
+  (Number(n) || 0).toLocaleString("th-TH", {
+    style: "currency",
+    currency: "THB",
+    minimumFractionDigits: 2,
+  });
 
-// ---------------- helpers: normalize backend responses ----------------
-function normalizeSettings(obj) {
-  const o = obj || {};
-  const map = {
-    shopName: o.shopName ?? o.shop_name,
-    logo: o.logo,
-    currency: o.currency,
-    vat: o.vat ?? o.vat_rate ?? "",
-    language: o.language ?? o.lang,
-  };
-  const out = {};
-  for (const [k, v] of Object.entries(map)) out[k] = v ?? "";
-  return out;
-}
 
-async function fetchAllSettingsFromBackend() {
-  try {
-    const res = await api.get("/settings", { validateStatus: s => s >= 200 && s < 500 });
-    if (res.status === 200 && res.data) {
-      // รองรับได้ทั้ง 3 รูปแบบ
-      // 1) { settings: { shopName, logo, ... } }
-      if (res.data.settings && typeof res.data.settings === "object") {
-        return normalizeSettings(res.data.settings);
-      }
-      // 2) [{ key: 'vat', value: '7' }, ...]
-      if (Array.isArray(res.data)) {
-        const obj = {};
-        for (const it of res.data) obj[it.key] = it.value;
-        return normalizeSettings(obj);
-      }
-      // 3) { shopName: "...", vat: "7", ... }
-      if (typeof res.data === "object") {
-        return normalizeSettings(res.data);
-      }
-    }
-  } catch {}
-
-  // fallback: โหลดทีละ key
-  const keys = ["shopName", "logo", "currency", "vat", "language"];
-  const out = {};
-  await Promise.all(
-    keys.map(async (k) => {
-      try {
-        const r = await api.get(`/settings/${encodeURIComponent(k)}`, {
-          validateStatus: (s) => s >= 200 && s < 500,
-        });
-        if (r.status === 200 && r.data) {
-          out[k] = (r.data.value ?? r.data[k] ?? r.data) ?? "";
-        }
-      } catch {}
-    })
-  );
-  return out;
-}
-
-async function saveAllSettingsToBackend(map) {
-  // ✅ แปลง vat เป็น number ก่อนส่ง (ถ้าเป็น "" จะไม่ส่ง)
-  const payload = { ...map };
-  if (payload.vat !== "" && !Number.isNaN(Number(payload.vat))) {
-    payload.vat = Number(payload.vat);
-  } else if (payload.vat === "") {
-    // ถ้าเว้นว่าง อาจเลือกไม่อัปเดต vat (ลบออกไป)
-    delete payload.vat;
-  }
-
-  // 1) พยายาม bulk ผ่าน PUT /api/settings (body: {settings: {...}})
-  try {
-    const res = await api.put(
-      "/settings",
-      { settings: payload },
-      { validateStatus: (s) => s >= 200 && s < 500 }
-    );
-    if (res.status >= 200 && res.status < 300) return true;
-  } catch {}
-
-  // 2) เผื่อ backend ทำ bulk เป็น /settings/bulk (body: {...})
-  try {
-    const res = await api.put(
-      "/settings/bulk",
-      payload,
-      { validateStatus: (s) => s >= 200 && s < 500 }
-    );
-    if (res.status >= 200 && res.status < 300) return true;
-  } catch {}
-
-  // 3) fallback: ทีละ key → PUT /api/settings/:key { value }
-  try {
-    const entries = Object.entries(payload);
-    for (const [k, v] of entries) {
-      await api.put(`/settings/${encodeURIComponent(k)}`, { value: v }, {
-        validateStatus: (s) => s >= 200 && s < 500
-      });
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ---------------- component ----------------
-export default function Settings() {
-  const [form, setForm] = useState(DEFAULTS);
+export default function SystemSettingsBasic() {
+  const navigate = useNavigate();
+  const [tab, setTab] = useState("general");
   const [saving, setSaving] = useState(false);
-  const [showSaved, setShowSaved] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
-  const [useBackend, setUseBackend] = useState(true); // เดาว่ามี backend ก่อน
   const [loading, setLoading] = useState(true);
-  const fileRef = useRef(null);
+
+  const [form, setForm] = useState({
+    storeName: "My Grocery Store",
+    phone: "",
+    address: "",
+    openTime: "07:00",
+    closeTime: "21:00",
+
+    payCash: true,
+    payPromptPay: true,
+    promptpayNumber: "",
+
+    printCopies: 1,
+    vatIncluded: true,
+    vatRate: 0,
+    receiptFooter: "** ขอบคุณที่ใช้บริการ **",
+    taxId: "0107542000011",
+    vatCode: "00639",
+    posNo: "SL00028",
+    cashierName: "warisa",
+    paymentMethodPreview: "โอนเงิน",
+
+    lowStockThreshold: 3,
+    expiryAlertDays: 7,
+    requireOpenShift: true,
+    shiftFloat: 500,
+  });
+
+  function update(p) {
+    setForm((f) => ({ ...f, ...p }));
+  }
 
   useEffect(() => {
-    (async () => {
+    const cached = localStorage.getItem("settings_basic");
+    if (cached) {
       try {
-        // 1) ลองโหลดจาก backend
-        const got = await fetchAllSettingsFromBackend();
-        const merged = { ...DEFAULTS, ...normalizeSettings(got) };
-
-        // ถ้า backend ไม่มีค่าอะไรเลย → ลอง localStorage ต่อ
-        const isEmpty =
-          Object.values(got || {}).filter((v) => v !== undefined && v !== "").length === 0;
-
-        if (isEmpty) {
-          const raw = localStorage.getItem(LS_KEY);
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              const next = { ...merged, ...parsed };
-              setForm(next);
-              setUseBackend(false);
-              setLoading(false);
-              return;
-            } catch {}
-          }
-        }
-
-        setForm(merged);
-        setUseBackend(true);
-      } catch {
-        // 2) ถ้า backend ล้มเหลว → fallback localStorage
-        const raw = localStorage.getItem(LS_KEY);
-        if (raw) {
-          try {
-            const parsed = JSON.parse(raw);
-            const next = { ...DEFAULTS, ...parsed };
-            setForm(next);
-          } catch {
-            setForm(DEFAULTS);
-          }
-        } else {
-          setForm(DEFAULTS);
-        }
-        setUseBackend(false);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  const setField = (k, v) => setForm((s) => ({ ...s, [k]: v }));
-
-  // --- Logo upload helpers (dataURL เก็บใน settings) ---
-  const readAsDataURL = (file) =>
-    new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload = () => res(String(reader.result || ""));
-      reader.onerror = rej;
-      reader.readAsDataURL(file);
-    });
-
-  const handleFiles = async (files) => {
-    const file = files?.[0];
-    if (!file) return;
-    const dataURL = await readAsDataURL(file);
-    setField("logo", dataURL);
-  };
-
-  const onPickLogo = async (e) => {
-    await handleFiles(e.target.files);
-    e.target.value = "";
-  };
-
-  const onDrop = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-    await handleFiles(e.dataTransfer?.files);
-  };
-
-  const onDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(true);
-  };
-
-  const onDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragOver(false);
-  };
-
-  const removeLogo = () => setField("logo", "");
-
-  const validate = () => {
-    if (
-      form.vat !== "" &&
-      (isNaN(Number(form.vat)) || Number(form.vat) < 0 || Number(form.vat) > 100)
-    ) {
-      alert("VAT ต้องเป็นตัวเลขระหว่าง 0 ถึง 100");
-      return false;
-    }
-    return true;
-  };
-
-  const onSave = async (e) => {
-    e.preventDefault();
-    if (!validate()) return;
-
-    setSaving(true);
-
-    const payload = {
-      shopName: form.shopName ?? "",
-      logo: form.logo ?? "",
-      currency: form.currency ?? "",
-      vat: form.vat ?? "",
-      language: form.language ?? "",
-    };
-
-    // เซฟ backend ถ้าใช้ได้ ไม่งั้นเก็บ LocalStorage
-    let ok = false;
-    if (useBackend) {
-      ok = await saveAllSettingsToBackend(payload);
-      if (!ok) {
-        localStorage.setItem(LS_KEY, JSON.stringify(payload));
-      }
-    } else {
-      localStorage.setItem(LS_KEY, JSON.stringify(payload));
-    }
-
-    // ✅ อัปเดต VAT ให้ POS ใช้งานทันที (ทั้ง localStorage + broadcast)
-    if (String(payload.vat ?? "") !== "") {
-      const vatNum = Number(payload.vat);
-      if (!Number.isNaN(vatNum)) {
-        localStorage.setItem("VAT_RATE", String(vatNum));
-        // แจ้งหน้าอื่น (เช่น POS) ที่อาจ subscribe storage event ให้รีเฟรชค่า
-        try {
-          window.dispatchEvent(new StorageEvent("storage", { key: "VAT_RATE", newValue: String(vatNum) }));
-        } catch {}
-      }
-    } else {
-      // ถ้าล้าง VAT → ลบค่า
-      localStorage.removeItem("VAT_RATE");
-      try {
-        window.dispatchEvent(new StorageEvent("storage", { key: "VAT_RATE", newValue: null }));
+        setForm((f) => ({ ...f, ...JSON.parse(cached) }));
       } catch {}
     }
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/settings/basic`);
+        if (!res.ok) throw new Error(`Load failed: ${res.status}`);
+        const data = await res.json();
+        if (!ignore && data && typeof data === "object") {
+          setForm((f) => ({ ...f, ...data }));
+          localStorage.setItem("settings_basic", JSON.stringify(data));
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (!ignore) setLoading(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, []);
 
-    // เก็บ mm_settings ไว้ด้วยเพื่อ fallback ให้ POS
-    localStorage.setItem(LS_KEY, JSON.stringify(payload));
-    try {
-      window.dispatchEvent(new StorageEvent("storage", { key: LS_KEY, newValue: JSON.stringify(payload) }));
-    } catch {}
 
+  const handleSave = async () => {
+  try {
+    setSaving(true);
+    const res = await fetch(`${API_URL}/api/settings/basic`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+    const data = await res.json();
+    if (data?.settings) {
+      setForm((f) => ({ ...f, ...data.settings }));
+      localStorage.setItem("settings_basic", JSON.stringify(data.settings));
+
+      // ส่งการตั้งค่าผ่าน query parameters ไปที่ Dashboard
+      const { lowStockThreshold, expiryAlertDays } = data.settings;
+      navigate(`/dashboard?lowStockThreshold=${lowStockThreshold}&expiryAlertDays=${expiryAlertDays}`);
+    }
+    alert("บันทึกการตั้งค่าเรียบร้อย ✅");
+  } catch (e) {
+    console.error(e);
+    alert("บันทึกไม่สำเร็จ");
+  } finally {
     setSaving(false);
-    setShowSaved(true);
-    setTimeout(() => setShowSaved(false), 1200);
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen p-6 grid place-items-center">
-        <div className="text-gray-500">กำลังโหลดการตั้งค่า…</div>
-      </div>
-    );
   }
+};
+
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-extrabold mb-4">ตั้งค่าระบบ</h1>
-
-        <form onSubmit={onSave} className="bg-white rounded-2xl ring-1 ring-black/10 p-5">
-          {/* ชื่อร้านค้า */}
-          <FieldLabel>ชื่อร้านค้า</FieldLabel>
-          <input
-            value={form.shopName}
-            onChange={(e) => setField("shopName", e.target.value)}
-            placeholder="กรอกชื่อร้าน"
-            className="w-full h-11 mb-4 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-          />
-
-          {/* โลโก้ร้านค้า - อัปโหลด/ลากวาง + พรีวิว */}
-          <FieldLabel>โลโก้ร้านค้า</FieldLabel>
-          <div
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onDragLeave={onDragLeave}
-            className={`mb-4 rounded-xl border-2 border-dashed p-4 flex items-center gap-4 transition
-              ${dragOver ? "border-indigo-500 bg-indigo-50/50" : "border-black/20"}
-            `}
-          >
-            <div className="h-16 w-16 rounded-lg bg-white ring-1 ring-black/10 overflow-hidden grid place-items-center">
-              {form.logo ? (
-                <img src={form.logo} alt="logo preview" className="h-full w-full object-cover" />
-              ) : (
-                <svg viewBox="0 0 24 24" className="w-7 h-7 text-gray-400" fill="currentColor">
-                  <path d="M19 13v6H5v-6H3v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6h-2Zm-6-1 3.5 3.5-1.42 1.42L13 15.83l-2.09 2.09-1.41-1.42L13 12ZM12 3l4 4h-3v5h-2V7H8l4-4Z" />
-                </svg>
-              )}
+    <div>
+      <header>
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+          <div className="flex items-center gap-2">
+            <div className="grid h-8 w-8 place-items-center rounded-lg bg-[#C80036] text-white">
+              <Store size={16} />
             </div>
-
-            <div className="flex-1">
-              <div className="text-sm text-gray-600">
-                ลากรูปมาวางที่นี่ หรือกดปุ่มเพื่ออัปโหลด (PNG/JPG)
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileRef.current?.click()}
-                  className="px-3 h-10 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-                >
-                  {form.logo ? "เปลี่ยนโลโก้" : "อัปโหลดโลโก้"}
-                </button>
-                {form.logo && (
-                  <button
-                    type="button"
-                    onClick={removeLogo}
-                    className="px-3 h-10 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"
-                  >
-                    ลบโลโก้
-                  </button>
-                )}
-              </div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={onPickLogo}
-              />
-            </div>
+            <h1 className="text-[15px] font-semibold">
+              ตั้งค่าระบบร้านขายของชำ
+            </h1>
           </div>
 
-          {/* สกุลเงิน */}
-          <FieldLabel>สกุลเงิน</FieldLabel>
-          <select
-            value={form.currency}
-            onChange={(e) => setField("currency", e.target.value)}
-            className="w-full h-11 mb-4 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-          >
-            <option value="">เลือกสกุลเงิน</option>
-            <option value="THB-บาท">THB-บาท</option>
-          </select>
-
-          {/* VAT (%) */}
-          <FieldLabel>Vat(%)</FieldLabel>
-          <input
-            type="number"
-            min="0"
-            max="100"
-            step="0.01"
-            value={form.vat}
-            onChange={(e) => setField("vat", e.target.value)}
-            placeholder="กรอกภาษีรายปี"
-            className="w-full h-11 mb-4 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-          />
-
-          {/* ภาษา */}
-          <FieldLabel>ภาษา</FieldLabel>
-          <select
-            value={form.language}
-            onChange={(e) => setField("language", e.target.value)}
-            className="w-full h-11 mb-4 px-3 border rounded-lg outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-          >
-            <option value="">เลือกภาษา</option>
-            <option value="th">ไทย</option>
-          </select>
-
-          {/* ปุ่ม */}
-          <div className="mt-6 flex justify-end gap-2">
+          <div className="flex items-center gap-2">
             <button
-              type="submit"
-              disabled={saving}
-              className="h-11 px-5 rounded-lg bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-60"
+              onClick={handleSave}
+              disabled={saving || loading}
+              className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-black disabled:opacity-50"
             >
-              {saving ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}
+              {saving ? "กำลังบันทึก…" : "บันทึก"}
             </button>
           </div>
-        </form>
-      </div>
+        </div>
 
-      {/* โมดัลบันทึกสำเร็จ */}
-      {showSaved && (
-        <div className="fixed inset-0 bg-black/30 grid place-items-center z-50">
-          <div className="bg-white rounded-2xl p-6 w-[min(420px,92vw)] text-center shadow-lg">
-            <div className="text-lg font-extrabold mb-2">บันทึกสำเร็จ</div>
-            <div className="mx-auto mb-3 flex items-center justify-center w-10 h-10 rounded-full bg-green-100 text-green-600">
-              ✓
+    <nav className="mx-auto max-w-6xl px-4 pb-3">
+  <div className="grid grid-cols-4 gap-2 rounded-xl border border-slate-200 bg-slate-100 p-1">
+    <Tab k="general" cur={tab} set={setTab} icon={<Store size={16} />} label="ทั่วไป" />
+    <Tab k="payments" cur={tab} set={setTab} icon={<ReceiptText size={16} />} label="ชำระเงิน" />
+    <Tab k="receipt" cur={tab} set={setTab} icon={<ReceiptText size={16} />} label="ใบเสร็จ" />
+    <Tab k="inventory" cur={tab} set={setTab} icon={<Boxes size={16} />} label="สต็อก" />
+  </div>
+</nav>
+
+
+      </header>
+
+      <main className="mx-auto max-w-6xl p-4">
+        {loading ? (
+          <div className="text-sm text-slate-500">กำลังโหลดการตั้งค่า…</div>
+        ) : (
+          <>
+            {tab === "general" && <General form={form} update={update} />}
+            {tab === "payments" && <Payments form={form} update={update} />}
+            {tab === "receipt" && <Receipt form={form} update={update} />}
+            {tab === "inventory" && <Inventory form={form} update={update} />}
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+/* --------------------------- Components --------------------------- */
+function Tab({ k, cur, set, icon, label }) {
+  const active = cur === k;
+  return (
+    <button
+      onClick={() => set(k)}
+      className={`w-full inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm transition ${active ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+      aria-pressed={active}
+    >
+      {icon}{label}
+    </button>
+  );
+}
+
+function Card({ title, children }) {
+  return (
+    <section className="mb-4 rounded-2xl border border-slate-200/80 bg-white/90 p-5 shadow-md">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="h-2 w-2 rounded-full bg-indigo-500" />
+        <h2 className="text-sm font-semibold">{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block text-sm">
+      <div className="mb-1 font-medium text-slate-700">{label}</div>
+        {children}
+    </label>
+  );
+}
+
+function FieldRow({ children }) {
+  return <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{children}</div>;
+}
+
+function Toggle({ label, checked, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`mb-2 inline-flex w-full items-center justify-between rounded-xl border px-3 py-2 text-sm hover:bg-slate-50 ${checked ? "border-slate-300" : "border-slate-200"}`}
+      aria-pressed={checked}
+    >
+      <span>{label}</span>
+      <span className={`h-6 w-10 rounded-full p-0.5 transition ${checked ? "bg-slate-900" : "bg-slate-300"}`}>
+        <span className={`block h-5 w-5 rounded-full bg-white shadow transition ${checked ? "translate-x-4" : "translate-x-0"}`} />
+      </span>
+    </button>
+  );
+}
+
+function Checkbox({ checked, onChange }) {
+  return <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900" />;
+}
+/* ------------------------------- Tabs -------------------------------- */
+function General({ form, update }) {
+  return (
+    <Card title="ข้อมูลร้าน">
+      {/* ชื่อร้าน */}
+      <Field
+        label="ชื่อร้าน"
+        hint="ฟิลด์นี้ถูกล็อก หากต้องการเปลี่ยนโปรดติดต่อผู้ดูแลระบบ"
+        labelClassName="font-medium text-slate-700"
+      >
+        <input
+          className="w-full rounded-md border border-gray-200 bg-slate-100 px-3 py-2 text-slate-600 cursor-not-allowed shadow-sm"
+          value={form.storeName}
+          readOnly
+          disabled
+        />
+      </Field>
+
+      {/* เบอร์โทร */}
+      <FieldRow>
+        <Field
+          label="โทร"
+          labelClassName="font-medium text-slate-700"
+        >
+          <input
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-slate-800 placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 transition"
+            value={form.phone}
+            onChange={(e) => update({ phone: e.target.value })}
+            placeholder="08x-xxx-xxxx"
+          />
+        </Field>
+      </FieldRow>
+
+      {/* ที่อยู่ */}
+      <Field
+        label="ที่อยู่"
+        labelClassName="font-medium text-slate-700"
+      >
+        <textarea
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-slate-800 placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 transition min-h-[88px]"
+          value={form.address}
+          onChange={(e) => update({ address: e.target.value })}
+          placeholder="เลขที่/ถนน/ตำบล/อำเภอ/จังหวัด/รหัสไปรษณีย์"
+        />
+      </Field>
+
+      {/* เวลาเปิด - ปิด */}
+      <Field
+        label="เวลาเปิด - ปิด"
+        labelClassName="font-medium text-slate-700"
+      >
+        <div className="flex items-center gap-2">
+          <input
+            type="time"
+            className="rounded-md border border-gray-300 px-2 py-1 text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 transition"
+            value={form.openTime}
+            onChange={(e) => update({ openTime: e.target.value })}
+          />
+          <span className="text-sm text-slate-500">ถึง</span>
+          <input
+            type="time"
+            className="rounded-md border border-gray-300 px-2 py-1 text-slate-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-200 transition"
+            value={form.closeTime}
+            onChange={(e) => update({ closeTime: e.target.value })}
+          />
+        </div>
+      </Field>
+    </Card>
+  );
+}
+
+
+// Inventory Tab ที่แจ้งเตือนหน้าอื่น
+function Inventory({ form, update }) {
+  const handleChange = (key, value) => {
+    update({ [key]: value });
+    // แจ้ง component อื่น
+    window.dispatchEvent(new CustomEvent("stock:updated", { detail: { key, value } }));
+  };
+
+  return (
+    <Card title="สต็อก (ตั้งค่าน้อย ใช้งานง่าย)">
+  <FieldRow>
+    {/* เตือนเมื่อสต็อกต่ำกว่า */}
+    <Field label="เตือนเมื่อสต็อกต่ำกว่า (ชิ้น)">
+      <div className="inline-flex items-stretch rounded-md border border-gray-300 shadow-sm overflow-hidden bg-white">
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() =>
+            handleChange(
+              "lowStockThreshold",
+              Math.max(0, (form.lowStockThreshold || 0) - 1)
+            )
+          }
+          aria-label="ลดค่าเตือนสต็อกต่ำ"
+        >
+          –
+        </button>
+        <input
+          type="number"
+          min={0}
+          className="w-20 px-3 py-2 text-center outline-none"
+          value={form.lowStockThreshold}
+          onChange={(e) =>
+            handleChange("lowStockThreshold", Math.max(0, +e.target.value || 0))
+          }
+        />
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() =>
+            handleChange(
+              "lowStockThreshold",
+              (form.lowStockThreshold || 0) + 1
+            )
+          }
+          aria-label="เพิ่มค่าเตือนสต็อกต่ำ"
+        >
+          +
+        </button>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        กำหนดขั้นต่ำที่ต้องการให้เตือน
+      </div>
+    </Field>
+
+    {/* เตือนของใกล้หมดอายุ */}
+    <Field label="เตือนของใกล้หมดอายุ (วัน)">
+      <div className="inline-flex items-stretch rounded-md border border-gray-300 shadow-sm overflow-hidden bg-white">
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() =>
+            handleChange(
+              "expiryAlertDays",
+              Math.max(0, (form.expiryAlertDays || 0) - 1)
+            )
+          }
+          aria-label="ลดวันเตือนหมดอายุ"
+        >
+          –
+        </button>
+        <input
+          type="number"
+          min={0}
+          className="w-20 px-3 py-2 text-center outline-none"
+          value={form.expiryAlertDays}
+          onChange={(e) =>
+            handleChange("expiryAlertDays", Math.max(0, +e.target.value || 0))
+          }
+        />
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() =>
+            handleChange("expiryAlertDays", (form.expiryAlertDays || 0) + 1)
+          }
+          aria-label="เพิ่มวันเตือนหมดอายุ"
+        >
+          +
+        </button>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">
+        เช่น กำหนด 7 วัน = เตือนสินค้าที่ใกล้หมดอายุภายใน 7 วัน
+      </div>
+    </Field>
+  </FieldRow>
+</Card>
+
+  );
+}
+
+
+function Payments({ form, update }) {
+  return (
+    <Card title="ช่องทางชำระเงิน">
+      <Toggle
+        label="เงินสด"
+        checked={form.payCash}
+        onChange={(v) => update({ payCash: v })}
+      />
+      <Toggle
+        label="PromptPay (สแกน QR)"
+        checked={form.payPromptPay}
+        onChange={(v) => update({ payPromptPay: v })}
+      />
+    </Card>
+  );
+}
+
+function Receipt({ form, update }) {
+  // ------- ตัวอย่างรายการ -------
+  const items = [{ name: "Potato", qty: 5, unitPrice: 8 }]; // 5 * 8 = 40
+  const sub = items.reduce((s, it) => s + it.qty * it.unitPrice, 0);
+  const vatRate = Number(form.vatRate || 0);
+  const vat = form.vatIncluded
+    ? Math.round((sub * vatRate) / (100 + vatRate) * 100) / 100
+    : Math.round((sub * vatRate) / 100 * 100) / 100;
+  const grand = form.vatIncluded ? sub : sub + vat;
+
+  // เวลาแสดงในไทย
+  const timeStr = new Date().toLocaleString("th-TH", {
+    hour12: false,
+  });
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <Card title="ตั้งค่าใบเสร็จ">
+  {/* แถวบน: จำนวนสำเนา + รวม VAT */}
+  <FieldRow>
+    <Field label="จำนวนสำเนาที่พิมพ์">
+      <div className="inline-flex items-stretch rounded-md border border-gray-300 shadow-sm overflow-hidden bg-white">
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() => update({ printCopies: Math.max(0, (form.printCopies || 0) - 1) })}
+          aria-label="ลดจำนวนสำเนา"
+        >
+          –
+        </button>
+        <input
+          type="number"
+          min={0}
+          max={3}
+          inputMode="numeric"
+          className="w-20 px-3 py-2 text-center outline-none"
+          value={form.printCopies}
+          onChange={(e) => {
+            const v = Math.max(0, Math.min(3, Number(e.target.value) || 0));
+            update({ printCopies: v });
+          }}
+        />
+        <button
+          type="button"
+          className="px-3 hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-indigo-300"
+          onClick={() => update({ printCopies: Math.min(3, (form.printCopies || 0) + 1) })}
+          aria-label="เพิ่มจำนวนสำเนา"
+        >
+          +
+        </button>
+      </div>
+      <div className="mt-1 text-xs text-slate-500">กำหนดได้ 0–3 สำเนา</div>
+    </Field>
+
+    <Field label="ราคารวม VAT แล้ว">
+      <label className="inline-flex items-center gap-3 rounded-md border border-gray-200 px-3 py-2 shadow-sm bg-white cursor-pointer select-none">
+        <Checkbox
+          checked={form.vatIncluded}
+          onChange={(v) => update({ vatIncluded: v })}
+        />
+        <span className="text-slate-700">คิด VAT รวมในราคา</span>
+      </label>
+    </Field>
+  </FieldRow>
+
+  {/* อัตรา VAT */}
+  <Field label="อัตรา VAT (%)">
+    <div className="relative inline-flex items-center">
+      <input
+        type="number"
+        min={0}
+        max={20}
+        step={0.01}
+        className="w-32 rounded-md border border-gray-300 px-3 py-2 pr-10 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-300"
+        value={form.vatRate}
+        onChange={(e) => {
+          const raw = parseFloat(e.target.value);
+          const v = Number.isFinite(raw) ? Math.max(0, Math.min(20, raw)) : 0;
+          update({ vatRate: v });
+        }}
+        placeholder="7.00"
+      />
+      <span className="pointer-events-none absolute right-2 text-slate-500">%</span>
+    </div>
+    <div className="mt-1 text-xs text-slate-500">รองรับทศนิยม เช่น 7 หรือ 7.00</div>
+  </Field>
+
+  {/* ข้อความท้ายใบเสร็จ */}
+  <Field label="ข้อความท้ายใบเสร็จ">
+    <input
+      className="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm placeholder:text-slate-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-300"
+      value={form.receiptFooter}
+      onChange={(e) => update({ receiptFooter: e.target.value })}
+      placeholder="** ขอบคุณที่ใช้บริการ **"
+    />
+  </Field>
+</Card>
+
+
+      {/* ========= ตัวอย่างใบเสร็จ ========= */}
+      <Card title="ตัวอย่างใบเสร็จ">
+        {/* พื้นหลังโทนครีมอ่อน */}
+        <div className="rounded-lg">
+          {/* กล่องใบเสร็จสีขาวขอบเทา */}
+          <div className="mx-auto w-full max-w-[560px] rounded-md border border-slate-300 bg-white p-4 text-sm font-sans shadow-sm">
+            {/* หัวบิล */}
+            <div className="text-center">
+              <div className="font-semibold"> {form.storeName} </div>
+              <div className="text-[12px] text-slate-700">
+                POS#{form.posNo || "SL00028"}
+              </div>
             </div>
-            <div>บันทึกการตั้งค่าเรียบร้อย</div>
+
+            {/* เส้นคั่น */}
+            <div className="my-3 border-t border-dashed border-slate-300" />
+
+            {/* รายการ */}
+            <div className="space-y-1">
+              {items.map((it, i) => (
+                <div key={i} className="flex justify-between">
+                  <span>
+                    {it.name} x{it.qty}
+                  </span>
+                  <span className="font-medium">
+                    {THB(it.qty * it.unitPrice)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* เส้นคั่น */}
+            <div className="my-3 border-t border-dashed border-slate-300" />
+
+            {/* สรุป */}
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>ยอดรวม</span>
+                <span>{THB(sub)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>VAT {vatRate}%</span>
+                <span>{form.vatIncluded ? THB(0) : THB(vat)}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span>ยอดสุทธิ</span>
+                <span>{THB(grand)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>ชำระโดย</span>
+                <span>{form.paymentMethodPreview || "เงินสด"}</span>
+              </div>
+            </div>
+
+            {/* เส้นคั่น */}
+            <div className="my-3 border-t border-dashed border-slate-300" />
+
+            {/* ฟุตเตอร์ */}
+            <div className="text-center text-[12px] text-slate-700 leading-5">
+              <div>
+                #{form.posNo || "SL00028"} {timeStr}
+              </div>
+              <div>พนักงาน: {form.cashierName || "-"}</div>
+              <div className="mt-1">{form.receiptFooter}</div>
+            </div>
           </div>
         </div>
-      )}
+      </Card>
     </div>
   );
 }
 
-function FieldLabel({ children }) {
-  return <div className="text-sm font-semibold text-gray-800 mb-1">{children}</div>;
-}
+
+/* --------------------------- UI primitives --------------------------- */
+
+

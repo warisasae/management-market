@@ -1,8 +1,7 @@
-// controllers/stockController.js
 import { prisma } from "../config/prisma.js";
 import { genId } from "../utils/id.js";
 
-// แปลงคำที่รับมาให้เป็น IN/OUT/ADJUST แบบชัดเจน
+// แปลงคำให้เป็น IN/OUT/ADJUST
 const normalizeChangeType = (t) => {
   if (!t) return null;
   const k = String(t).trim().toUpperCase();
@@ -15,18 +14,19 @@ const normalizeChangeType = (t) => {
 // POST /api/stocks
 export async function createStockTx(req, res, next) {
   try {
-    const { product_id, change_type, quantity, note, user_id: userIdFromBody } = req.body;
+    const { product_id, change_type, quantity, note } = req.body;
 
-    // รองรับทั้ง auth middleware และ body
-    const actorId = req.user?.user_id || userIdFromBody || null;
+    // ✅ ใช้ผู้ทำรายการจาก session เท่านั้น
+    const actorId = req.user?.user_id;
+    if (!actorId) return res.status(401).json({ error: "unauthorized" });
 
     const type = normalizeChangeType(change_type);
     const qty = Number(quantity);
 
     if (!product_id || !type || !Number.isFinite(qty)) {
-      return res
-        .status(400)
-        .json({ error: "product_id, change_type(IN/OUT/ADJUST), quantity(number) required" });
+      return res.status(400).json({
+        error: "product_id, change_type(IN/OUT/ADJUST), quantity(number) required",
+      });
     }
     if (["IN", "OUT"].includes(type) && qty <= 0) {
       return res.status(400).json({ error: "quantity must be > 0 for IN/OUT" });
@@ -35,23 +35,20 @@ export async function createStockTx(req, res, next) {
     const result = await prisma.$transaction(async (tx) => {
       const prod = await tx.product.findUnique({ where: { product_id } });
       if (!prod) throw new Error("product_not_found");
-
-      // บล็อกสินค้าที่ UNAVAILABLE ทุกกรณี
       if (prod.status === "UNAVAILABLE") throw new Error("product_unavailable");
 
-      // คำนวณ delta
+      // คำนวณ delta ที่จะบันทึก
       let delta = 0;
       if (type === "IN") delta = Math.abs(qty);
       else if (type === "OUT") delta = -Math.abs(qty);
-      else delta = qty; // ADJUST อนุญาตเลข +/- ได้
+      else delta = qty; // ADJUST รับได้ +/- ตามที่ส่งมา
 
       const newQty = (Number(prod.stock_qty) || 0) + delta;
       if (newQty < 0) throw new Error("insufficient_stock");
 
-      // อัปเดตสถานะ
       const newStatus = newQty <= 0 ? "OUT_OF_STOCK" : "AVAILABLE";
 
-      // gen ไอดี
+      // gen ไอดี ST###
       const stock_id = await genId({
         client: tx,
         model: "stockTransaction",
@@ -60,13 +57,13 @@ export async function createStockTx(req, res, next) {
         pad: 3,
       });
 
-      // สร้าง transaction
+      // บันทึก transaction (ผูกผู้บันทึกจาก session)
       const createdTx = await tx.stockTransaction.create({
         data: {
           stock_id,
           product_id,
           change_type: type,
-          quantity: delta, // delta จริง
+          quantity: delta,
           note: note || null,
           user_id: actorId,
         },
@@ -76,7 +73,7 @@ export async function createStockTx(req, res, next) {
         },
       });
 
-      // อัปเดตสินค้า
+      // อัปเดตยอดคงเหลือสินค้า
       await tx.product.update({
         where: { product_id },
         data: { stock_qty: newQty, status: newStatus },
@@ -134,6 +131,28 @@ export async function getStockTxById(req, res, next) {
     });
     if (!row) return res.status(404).json({ error: "stock transaction not found" });
     res.json(row);
+  } catch (e) {
+    next(e);
+  }
+}
+
+// GET /api/stocks/actors
+export async function listStockActors(req, res, next) {
+  try {
+    const users = await prisma.user.findMany({
+      // where: { role: { in: ["ADMIN","STAFF"] }, is_active: true },
+      select: { user_id: true, username: true, name: true },
+      orderBy: [{ username: "asc" }],
+    });
+
+    res.json(
+      users.map((u) => ({
+        user_id: u.user_id,
+        username: u.username,
+        name: u.name,
+        display: u.username || u.name || "—",
+      }))
+    );
   } catch (e) {
     next(e);
   }

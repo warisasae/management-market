@@ -12,4 +12,4 @@ const storage = multer.diskStorage({
     cb(null, 'shop-logo' + ext);
   }
 });
-export const upload = multer({ storage });
+export const uploads = multer({ storage });

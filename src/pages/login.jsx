@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { setAuth } from "../lib/auth";
+import { setAuth } from "../lib/auth"; // ตรวจสอบว่าใช้งาน setAuth อย่างถูกต้อง
 
 export default function Login() {
   const [identifier, setIdentifier] = useState(""); // username
@@ -11,72 +11,62 @@ export default function Login() {
   const navigate = useNavigate();
 
   async function handleSubmit(e) {
-    e.preventDefault();
-    const username = identifier.trim();
-    const pw = password.trim();
-    if (!username || !pw) return;
+  e.preventDefault();
+  const username = identifier.trim();
+  const pw = password.trim();
+  if (!username || !pw || loading) return;
 
-    try {
-      setLoading(true);
+  setLoading(true);
+  try {
+    const res = await api.post(
+      "/auth/login",
+      { username, password: pw },
+      { validateStatus: (s) => s >= 200 && s < 500 }
+    );
 
-      // เรียก backend login
-      const res = await api.post(
-        "/auth/login",
-        { username, password: pw },
-        { validateStatus: (s) => s >= 200 && s < 500 }
-      );
+    if (res.status === 200 && res.data?.user) {
+      let user = res.data.user; // { user_id, username, name, role, image_url? }
 
-      if (res.status === 200 && res.data?.token && res.data?.user) {
-        const { token } = res.data;
-        let user = res.data.user; // { user_id, username, name, role, image_url? }
+      // ❌ ไม่ต้องยุ่งกับ token (เราใช้ session cookie แล้ว)
+      // ลบโค้ดเกี่ยวกับ token ทั้งหมด
 
-        // ถ้า backend ยังไม่ส่ง image_url (null/undefined) ให้ดึงโปรไฟล์เต็มมาเติมก่อน
-        try {
-          if ((!user.image_url || user.image_url === "") && user.user_id) {
-            const uRes = await api.get(`/users/${encodeURIComponent(user.user_id)}`, {
-              validateStatus: (s) => s >= 200 && s < 500,
-            });
-            if (uRes.status === 200 && uRes.data) {
-              user = { ...user, image_url: uRes.data.image_url || null };
-            }
+      // (ออปชัน) เติม image_url ถ้ายังไม่มี (endpoint นี้ต้องอนุญาตด้วย session)
+      try {
+        if ((!user.image_url || user.image_url === "") && user.user_id) {
+          const uRes = await api.get(`/users/${encodeURIComponent(user.user_id)}`, {
+            validateStatus: (s) => s >= 200 && s < 500,
+          });
+          if (uRes.status === 200 && uRes.data) {
+            user = { ...user, image_url: uRes.data.image_url || null };
           }
-        } catch {
-          // เงียบไว้ ใช้ข้อมูลที่มี
         }
-
-        const roleUpper = String(user.role || "").toUpperCase(); // ADMIN | USER
-
-        // เก็บ session
-        setAuth({
-          token,
-          user: {
-            id: user.user_id,
-            username: user.username,
-            name: user.name,
-            role: roleUpper,           // เก็บ EN บนฟรอนต์
-            image_url: user.image_url || null,
-          },
-        });
-        // กัน libs อื่นไม่ตั้ง isLoggedIn
-        localStorage.setItem("isLoggedIn", "true");
-
-        // นำทางตาม role
-        navigate(roleUpper === "ADMIN" ? "/dashboard/users" : "/dashboard");
-        return;
+      } catch {
+        // เงียบไว้ ใช้ข้อมูลเท่าที่มี
       }
 
-      if (res.status === 401) {
-        alert("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
-        return;
-      }
+      // ✅ เก็บสถานะฝั่ง client (สำหรับ UI state เท่านั้น)
+      setAuth({ user });
+      localStorage.setItem("isLoggedIn", "true");
 
-      alert(res.data?.error || "เข้าสู่ระบบไม่สำเร็จ");
-    } catch {
-      alert("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
-    } finally {
-      setLoading(false);
+      // ✅ นำทางตาม role
+      const roleUpper = String(user.role || "").toUpperCase(); // ADMIN | USER
+      const target = roleUpper === "ADMIN" ? "/dashboard" : "/dashboard/pos";
+      navigate(target, { replace: true });
+      return;
     }
+
+    if (res.status === 401) {
+      alert("ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
+      return;
+    }
+
+    alert(res.data?.error || "เข้าสู่ระบบไม่สำเร็จ");
+  } catch {
+    alert("ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้");
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <div className="min-h-screen grid grid-cols-1 md:grid-cols-2">
@@ -122,9 +112,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-4 rounded-full text-white text-xl font-semibold transition ${
-              loading ? "bg-gray-400" : "bg-[#0b1b3b] hover:brightness-110"
-            }`}
+            className={`w-full py-4 rounded-full text-white text-xl font-semibold transition ${loading ? "bg-gray-400" : "bg-[#0b1b3b] hover:brightness-110"}`}
           >
             {loading ? "กำลังเข้าสู่ระบบ..." : "ลงชื่อเข้าใช้"}
           </button>

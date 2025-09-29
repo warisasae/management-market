@@ -1,4 +1,3 @@
-// src/pages/ProductDetail.jsx
 import { useEffect, useState, useMemo } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api";
@@ -10,7 +9,7 @@ const THB = (n) =>
   });
 
 export default function ProductDetail() {
-  const { id } = useParams(); // product_id
+  const { id } = useParams();
   const navigate = useNavigate();
 
   const [product, setProduct] = useState(null);
@@ -22,20 +21,34 @@ export default function ProductDetail() {
       try {
         setLoading(true);
         setError("");
-        // ✅ ตัด /api ออก (เพราะ baseURL = /api อยู่แล้ว)
         const res = await api.get(`/products/${id}`);
         setProduct(res.data);
       } catch (err) {
-        if (err?.response?.status === 404) {
-          setProduct(null);
-        } else {
-          setError("โหลดข้อมูลไม่สำเร็จ");
-        }
+        if (err?.response?.status === 404) setProduct(null);
+        else setError("โหลดข้อมูลไม่สำเร็จ");
       } finally {
         setLoading(false);
       }
     })();
   }, [id]);
+
+  // Badge สีตามวันหมดอายุ
+  const expiryBadge = useMemo(() => {
+  if (!product?.expiry_date) return null;
+
+  const today = new Date();
+  const expiry = new Date(product.expiry_date);
+  const diffDays = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+
+  // ใช้ค่า alert จาก settings ถ้ามี
+  const alertDays = product.expiryAlertDays ?? 7; // default 7 วัน
+
+  if (diffDays <= 0)
+    return <span className="text-red-600 font-semibold">⚠️ หมดอายุ</span>;
+  if (diffDays <= alertDays)
+    return <span className="text-yellow-600 font-semibold">⚠️ ใกล้หมดอายุ</span>;
+  return <span className="text-green-600 font-semibold">ปกติ</span>;
+}, [product]);
 
   const statusBadge = useMemo(() => {
     const s = product?.status;
@@ -48,33 +61,9 @@ export default function ProductDetail() {
     return "-";
   }, [product]);
 
-  if (loading) {
-    return (
-      <Wrapper navigate={navigate} title="รายละเอียดสินค้า">
-        <Card>
-          <div className="text-center text-gray-500 py-10">กำลังโหลด...</div>
-        </Card>
-      </Wrapper>
-    );
-  }
-
-  if (error) {
-    return (
-      <Wrapper navigate={navigate} title="รายละเอียดสินค้า">
-        <Card>
-          <div className="text-center text-red-600 py-10">{error}</div>
-        </Card>
-      </Wrapper>
-    );
-  }
-
-  if (!product) {
-    return (
-      <Wrapper navigate={navigate} title="รายละเอียดสินค้า">
-        <Card>ไม่พบสินค้า</Card>
-      </Wrapper>
-    );
-  }
+  if (loading) return <Wrapper navigate={navigate} title="รายละเอียดสินค้า"><Card><div className="text-center text-gray-500 py-10">กำลังโหลด...</div></Card></Wrapper>;
+  if (error) return <Wrapper navigate={navigate} title="รายละเอียดสินค้า"><Card><div className="text-center text-red-600 py-10">{error}</div></Card></Wrapper>;
+  if (!product) return <Wrapper navigate={navigate} title="รายละเอียดสินค้า"><Card>ไม่พบสินค้า</Card></Wrapper>;
 
   return (
     <Wrapper navigate={navigate} title="รายละเอียดสินค้า">
@@ -84,13 +73,13 @@ export default function ProductDetail() {
           <Row label="ชื่อสินค้า" value={product.product_name} />
           <Row label="หมวดหมู่" value={product.category?.category_name || "-"} />
           <Row label="ราคาขาย" value={THB(product.sell_price)} />
-          <Row
-            label="จำนวนคงเหลือ"
-            value={`${product.stock_qty ?? 0} ${product.unit || ""}`.trim()}
-          />
+          <Row label="จำนวนคงเหลือ" value={`${product.stock_qty ?? 0} ${product.unit || ""}`.trim()} />
           <Row label="หน่วย" value={product.unit || "-"} />
           <Row label="บาร์โค้ด" value={product.barcode || "-"} />
           <Row label="สถานะ" value={statusBadge} />
+          <Row label="วันหมดอายุ" value={product.expiry_date ? new Date(product.expiry_date).toLocaleDateString("th-TH") : "-"} className="flex items-center gap-2">
+            {expiryBadge}
+          </Row>
         </dl>
 
         {product.image_url && (
@@ -131,9 +120,7 @@ function Wrapper({ navigate, title, children }) {
 }
 
 function Card({ children }) {
-  return (
-    <div className="bg-white rounded-2xl ring-1 ring-black/5 p-6">{children}</div>
-  );
+  return <div className="bg-white rounded-2xl ring-1 ring-black/5 p-6">{children}</div>;
 }
 
 function Row({ label, value, className = "" }) {
@@ -143,7 +130,7 @@ function Row({ label, value, className = "" }) {
         <span>{label}</span>
         <span className="mx-2">:</span>
       </div>
-      <div className="font-medium">{value}</div>
+      <div className="font-medium flex items-center gap-2">{value}</div>
     </div>
   );
 }

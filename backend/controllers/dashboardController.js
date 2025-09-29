@@ -12,31 +12,40 @@ const ALLOWED_STATES = ["AVAILABLE", "OUT_OF_STOCK"];
 function todayRangeUTCForBangkok() {
   const now = new Date();
 
-  // เวลาไทย = UTC+7
-  const bkkOffset = 7 * 60 * 60 * 1000;
-
-  // เอาเวลา UTC ปัจจุบัน +7 ชั่วโมง = เวลาไทย
-  const bkkNow = new Date(now.getTime() + bkkOffset);
-
-  // เริ่มต้นวันไทย 00:00
+  // ใช้ local time ของ server
   const bkkStart = new Date(
-    bkkNow.getFullYear(),
-    bkkNow.getMonth(),
-    bkkNow.getDate(),
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
     0, 0, 0, 0
   );
 
-  // แปลงกลับเป็น UTC สำหรับ query
-  const startUtc = new Date(bkkStart.getTime() - bkkOffset);
-  const endUtc = new Date(startUtc.getTime() + 24 * 60 * 60 * 1000); // 23:59:59.999
+  const bkkEnd = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    23, 59, 59, 999
+  );
+
+  // UTC
+  const startUtc = new Date(bkkStart.toISOString());
+  const endUtc = new Date(bkkEnd.toISOString());
+
+  // เวลาไทย (toLocaleString + timeZone: "Asia/Bangkok")
+  const startBkk = startUtc.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
+  const endBkk = endUtc.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" });
 
   console.log("=== Dashboard Today Range ===");
   console.log("startUtc:", startUtc.toISOString());
   console.log("endUtc:", endUtc.toISOString());
+  console.log("startBkk:", startBkk);
+  console.log("endBkk:", endBkk);
 
-  return { startUtc, endUtc };
+  return { startUtc, endUtc, startBkk, endBkk };
 }
 
+// 🟢 เรียกใช้
+todayRangeUTCForBangkok();
 
 
 /** ดึง sale_id ภายในช่วงเวลา (ใช้ created_at) */

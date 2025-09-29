@@ -1,0 +1,8 @@
+-- prisma/patch_add_sale_status.sql
+
+ALTER TABLE "Sale"
+  ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'PAID',
+  ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS voided_by TEXT,
+  ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS refunded_by TEXT;

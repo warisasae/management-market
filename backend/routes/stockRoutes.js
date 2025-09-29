@@ -1,8 +1,17 @@
-import { Router } from 'express';
-import { createStockTx, getAllStockTx, getStockTxById } from '../controllers/stockController.js';
+import { Router } from "express";
+import {
+  createStockTx,
+  getAllStockTx,
+  getStockTxById,
+  listStockActors,
+} from "../controllers/stockController.js";
 
 const router = Router();
-router.post('/', createStockTx);
-router.get('/', getAllStockTx);
-router.get('/:id', getStockTxById);
+
+// ลำดับสำคัญ: /actors ต้องมาก่อน /:id
+router.get("/", getAllStockTx);
+router.get("/actors", listStockActors);
+router.get("/:id", getStockTxById);
+router.post("/", createStockTx);
+
 export default router;

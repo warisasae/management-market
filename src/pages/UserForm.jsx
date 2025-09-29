@@ -1,25 +1,41 @@
-// src/pages/UserForm.jsx
+// src/pages/UserForm.jsx                                                                                                                                           
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useOutletContext } from "react-router-dom"; 
 import { api } from "../lib/api";
+import { getCurrentUser, saveCurrentUser } from "../lib/auth"; 
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:4000";
-const DEFAULT_AVATAR_SRC = "/default-avatar.png"; // ← วางไฟล์ใน public/
+const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:4000").replace(/\/+$/, "");
 
 function resolveUrl(u) {
   if (!u) return "";
-  return u.startsWith("http") ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`;
+  return /^https?:\/\//i.test(u) ? u : `${API_BASE}${u.startsWith("/") ? "" : "/"}${u}`;
+}
+
+// สร้างตัวอักษรย่อจากชื่อ
+function getInitials(nameLike) {
+  const s = String(nameLike || "").trim();
+  if (!s) return "?";
+  const parts = s.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  // คำเดียว: เอา 2 ตัวแรก
+  return s.slice(0, 2).toUpperCase();
 }
 
 export default function UserForm({ mode = "create" }) {
   const navigate = useNavigate();
   const { id } = useParams();
   const isEdit = mode === "edit";
-  const isSelfEdit = mode === "self-edit"; // ✅ โหมดใหม่
+  const isSelfEdit = mode === "self-edit";
 
-  // ถ้า self-edit → ใช้ id ของ user ปัจจุบัน
-  const auth = JSON.parse(localStorage.getItem("mm_auth") || "{}");
-  const selfId = auth?.user?.id || auth?.id;
+  // ใช้ useOutletContext เพื่อรับฟังก์ชันจาก Layout
+  const context = useOutletContext();
+  const onUserUpdate = context?.onUserUpdate;
+
+  // ใช้ getCurrentUser() แทนการอ่าน localStorage โดยตรง
+  const currentUser = getCurrentUser() || {};
+  const selfId = currentUser?.user_id; // ใช้ user_id ที่ normalize แล้ว
   const effectiveId = isSelfEdit ? selfId : id;
 
   const [empName, setEmpName] = useState("");
@@ -27,17 +43,17 @@ export default function UserForm({ mode = "create" }) {
   const [role, setRole] = useState("USER");
   const [password, setPassword] = useState("");
 
-  // รูปโปรไฟล์
+  // โปรไฟล์รูป
   const [imageUrl, setImageUrl] = useState("");
   const [imageFile, setImageFile] = useState(null);
   const [preview, setPreview] = useState("");
-  const [uploading, setUploading] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
+  const [uploading, setUploading] = useState(false);
   const [showSaved, setShowSaved] = useState(false);
   const [loading, setLoading] = useState(isEdit || isSelfEdit);
   const [saving, setSaving] = useState(false);
 
-  // โหลดข้อมูลผู้ใช้
   useEffect(() => {
     if (!(isEdit || isSelfEdit) || !effectiveId) return;
     let alive = true;
@@ -53,8 +69,10 @@ export default function UserForm({ mode = "create" }) {
           setEmpName(u.name || "");
           setUsername(u.username || "");
           setRole((u.role || "USER").toUpperCase());
-          setImageUrl(u.image_url || "");
+          // ตรวจสอบว่า API คืน image_url หรือไม่
+          setImageUrl(u.image_url || ""); 
           setPassword("");
+          setImgError(false);
         } else {
           navigate("/dashboard/users", { replace: true });
         }
@@ -64,12 +82,9 @@ export default function UserForm({ mode = "create" }) {
         if (alive) setLoading(false);
       }
     })();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, [isEdit, isSelfEdit, effectiveId, navigate]);
 
-  // จัดการไฟล์รูป
   const onPickImage = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -79,12 +94,14 @@ export default function UserForm({ mode = "create" }) {
     }
     setImageFile(file);
     setPreview(URL.createObjectURL(file));
+    setImgError(false);
   };
 
   const useDefaultImage = () => {
     setImageFile(null);
     setPreview("");
-    setImageUrl(""); // → บันทึก null
+    setImageUrl("");
+    setImgError(true); // บังคับ fallback เป็นตัวอักษร
   };
 
   const title = useMemo(() => {
@@ -92,7 +109,6 @@ export default function UserForm({ mode = "create" }) {
     return isEdit ? "แก้ไขข้อมูลผู้ใช้" : "เพิ่มผู้ใช้งาน";
   }, [isEdit, isSelfEdit]);
 
-  // อัปโหลดรูปไป backend
   const uploadImageIfNeeded = async () => {
     if (!imageFile) return imageUrl || "";
     const form = new FormData();
@@ -114,7 +130,8 @@ export default function UserForm({ mode = "create" }) {
 
   const onSubmit = async (e) => {
     e.preventDefault();
-    if (!empName.trim() || !username.trim()) return;
+    // อนุญาตให้แก้ไขรูปโปรไฟล์/รหัสผ่านโดยไม่กรอกชื่อผู้ใช้/ชื่อพนักงาน ถ้าเป็นการแก้ไขตัวเอง
+    if (!isSelfEdit && (!empName.trim() || !username.trim())) return; 
 
     try {
       setSaving(true);
@@ -123,12 +140,18 @@ export default function UserForm({ mode = "create" }) {
       const finalImageUrl = rawImage || (imageUrl ? imageUrl : null);
 
       if (isEdit || isSelfEdit) {
+        // ⭐️ FIX: เพิ่ม 'const' เพื่อประกาศตัวแปร 'updatePayload' (แก้ปัญหา 'updatePayload is not defined')
+        const updatePayload = { 
+            image_url: finalImageUrl,
+            // ในหน้า SelfEdit ไม่ควรอัปเดต role
+            role: isSelfEdit ? undefined : role, 
+            name: empName.trim() || undefined,
+            username: username.trim() || undefined,
+        };
+
         const resProfile = await api.put(
           `/users/${encodeURIComponent(effectiveId)}`,
-          {
-            role: isSelfEdit ? undefined : role, // self-edit แก้ role ไม่ได้
-            image_url: finalImageUrl,
-          },
+          updatePayload,
           { validateStatus: (s) => s >= 200 && s < 500 }
         );
         if (resProfile.status < 200 || resProfile.status >= 300) {
@@ -146,24 +169,27 @@ export default function UserForm({ mode = "create" }) {
           }
         }
 
-        // ถ้าแก้ข้อมูลของตัวเอง → sync localStorage
         if (isSelfEdit) {
-          const raw = localStorage.getItem("mm_auth");
-          if (raw) {
-            const auth = JSON.parse(raw);
-            const next = {
-              ...auth,
-              user: {
-                ...(auth.user || {}),
-                image_url: finalImageUrl,
-              },
-            };
-            localStorage.setItem("mm_auth", JSON.stringify(next));
-            window.dispatchEvent(new StorageEvent("storage", { key: "mm_auth" }));
+          // สร้างข้อมูลผู้ใช้ที่อัปเดตแล้ว
+          const current = getCurrentUser(); 
+          const updatedUser = {
+            ...current,
+            // อัปเดตเฉพาะสิ่งที่เปลี่ยน
+            name: empName.trim() || current.name, 
+            username: username.trim() || current.username,
+            image_url: finalImageUrl,
+          };
+          
+          // บันทึกเข้า Local Storage
+          saveCurrentUser(updatedUser); 
+
+          // แจ้ง Layout ให้อัปเดต State (ทำให้ Sidebar เรนเดอร์ใหม่)
+          if (onUserUpdate) {
+             onUserUpdate(); 
           }
         }
       } else {
-        // create user
+        // ... (โค้ดการสร้างผู้ใช้ใหม่เหมือนเดิม)
         if (!password.trim()) {
           alert("กรุณากรอกรหัสผ่านสำหรับผู้ใช้ใหม่");
           setSaving(false);
@@ -191,9 +217,16 @@ export default function UserForm({ mode = "create" }) {
       }
 
       setShowSaved(true);
+      
+      // ⭐️ FIX: หน่วงเวลาการ Redirect เพื่อแก้ปัญหา Race Condition (รูปเด้งกลับ)
       setTimeout(() => {
         setShowSaved(false);
-        navigate("/dashboard/users");
+        
+        // หน่วงเวลาการ Redirect 100ms
+        setTimeout(() => {
+          const redirectPath = isSelfEdit ? "/dashboard" : "/dashboard/users";
+          navigate(redirectPath, { replace: true });
+        }, 100); 
       }, 900);
     } catch (err) {
       alert(err?.message || "เกิดข้อผิดพลาด");
@@ -210,7 +243,10 @@ export default function UserForm({ mode = "create" }) {
     );
   }
 
-  const displayImage = preview || resolveUrl(imageUrl) || DEFAULT_AVATAR_SRC;
+  const nameForInitial = empName || username;
+  const initials = getInitials(nameForInitial);
+  const mergedImage = preview || resolveUrl(imageUrl);
+  const showImage = !!mergedImage && !imgError;
 
   return (
     <div className="min-h-screen p-6">
@@ -231,50 +267,49 @@ export default function UserForm({ mode = "create" }) {
         <form onSubmit={onSubmit} className="bg-white rounded-2xl ring-1 ring-black/10 p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* ชื่อพนักงาน */}
-<div>
-  <label className="block text-sm text-gray-700 mb-1">ชื่อพนักงาน</label>
-  <input
-    value={empName}
-    onChange={(e) => setEmpName(e.target.value)}
-    disabled={isEdit || isSelfEdit}
-    className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
-      ${isEdit || isSelfEdit 
-        ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed" 
-        : "border border-gray-400"}`}
-  />
-</div>
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">ชื่อพนักงาน</label>
+              <input
+                value={empName}
+                onChange={(e) => setEmpName(e.target.value)}
+                disabled={isEdit && !isSelfEdit} // อนุญาตให้แก้ไขชื่อตัวเอง
+                className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
+                  ${isEdit && !isSelfEdit
+                    ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
+                    : "border border-gray-400"}`}
+              />
+            </div>
 
-{/* สิทธิ์การใช้งาน */}
-<div>
-  <label className="block text-sm text-gray-700 mb-1">สิทธิ์การใช้งาน</label>
-  <select
-    value={role}
-    onChange={(e) => setRole(e.target.value)}
-    disabled={isSelfEdit}
-    className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
-      ${isSelfEdit 
-        ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed" 
-        : "border border-gray-400"}`}
-  >
-    <option value="USER">พนักงานขาย</option>
-    <option value="ADMIN">แอดมิน</option>
-  </select>
-</div>
+            {/* สิทธิ์การใช้งาน */}
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">สิทธิ์การใช้งาน</label>
+              <select
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                disabled={isSelfEdit}
+                className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
+                  ${isSelfEdit
+                    ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
+                    : "border border-gray-400"}`}
+              >
+                <option value="USER">พนักงานขาย</option>
+                <option value="ADMIN">แอดมิน</option>
+              </select>
+            </div>
 
-{/* ชื่อผู้ใช้ */}
-<div>
-  <label className="block text-sm text-gray-700 mb-1">ชื่อผู้ใช้</label>
-  <input
-    value={username}
-    onChange={(e) => setUsername(e.target.value)}
-    disabled={isEdit || isSelfEdit}
-    className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
-      ${isEdit || isSelfEdit 
-        ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed" 
-        : "border border-gray-400"}`}
-  />
-</div>
-
+            {/* ชื่อผู้ใช้ */}
+            <div>
+              <label className="block text-sm text-gray-700 mb-1">ชื่อผู้ใช้</label>
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                disabled={isEdit && !isSelfEdit} // อนุญาตให้แก้ไขชื่อผู้ใช้ตัวเอง
+                className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
+                  ${isEdit && !isSelfEdit
+                    ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
+                    : "border border-gray-400"}`}
+              />
+            </div>
 
             {/* รหัสผ่าน */}
             <div>
@@ -292,9 +327,22 @@ export default function UserForm({ mode = "create" }) {
             <div className="md:col-span-2">
               <label className="block text-sm text-gray-700 mb-2">รูปโปรไฟล์</label>
               <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full overflow-hidden border">
-                  <img src={displayImage} alt="preview" className="w-full h-full object-cover" />
+                {/* preview zone */}
+                <div className="w-16 h-16 rounded-full overflow-hidden border grid place-items-center bg-gray-100">
+                  {showImage ? (
+                    <img
+                      src={mergedImage}
+                      alt="preview"
+                      className="w-full h-full object-cover"
+                      onError={() => setImgError(true)}
+                    />
+                  ) : (
+                    <div className="w-full h-full grid place-items-center bg-gradient-to-br from-slate-200 to-slate-300">
+                      <span className="text-slate-700 font-bold select-none">{initials}</span>
+                    </div>
+                  )}
                 </div>
+
                 <div className="flex items-center gap-2">
                   <label className="px-3 h-10 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer flex items-center gap-2">
                     <span>เลือกไฟล์</span>
@@ -325,7 +373,7 @@ export default function UserForm({ mode = "create" }) {
             </button>
             <button
               type="button"
-              onClick={() => navigate("/dashboard/users")}
+              onClick={() => navigate(-1)} 
               className="px-5 h-11 rounded-lg bg-red-600 text-white hover:bg-red-700 font-semibold"
             >
               ยกเลิก

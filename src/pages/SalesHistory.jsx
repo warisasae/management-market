@@ -1,4 +1,3 @@
-// src/pages/SalesHistory.jsx
 import { useMemo, useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
@@ -30,12 +29,15 @@ export default function SalesHistory() {
   const [sales, setSales] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // pagination
+  const [page, setPage] = useState(1);
+  const perPage = 10;
+
   // โหลดข้อมูลประวัติการขายจาก backend
   useEffect(() => {
     (async () => {
       try {
         setLoading(true);
-        // ✅ baseURL = /api แล้ว ใช้ path แค่ /sales
         const res = await api.get("/sales");
         setSales(res.data || []);
       } catch (err) {
@@ -60,6 +62,18 @@ export default function SalesHistory() {
       return matchQ && matchDate && matchPayment;
     });
   }, [q, date, payment, sales]);
+
+  // รีเซ็ตหน้าเมื่อเปลี่ยนตัวกรอง
+  useEffect(() => {
+    setPage(1);
+  }, [q, date, payment]);
+
+  // slice ตามหน้า
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * perPage;
+  const end = start + perPage;
+  const paginated = filtered.slice(start, end);
 
   const resetFilters = () => {
     setQ("");
@@ -92,7 +106,7 @@ export default function SalesHistory() {
         >
           <option value="">วิธีชำระเงิน (ทั้งหมด)</option>
           <option value="เงินสด">เงินสด</option>
-          <option value="โอนเงิน">โอนเงิน</option>
+          <option value="PromptPay">PromptPay</option>
         </select>
         <button
           onClick={resetFilters}
@@ -121,14 +135,14 @@ export default function SalesHistory() {
                   กำลังโหลด...
                 </td>
               </tr>
-            ) : filtered.length === 0 ? (
+            ) : paginated.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
                   ไม่พบข้อมูล
                 </td>
               </tr>
             ) : (
-              filtered.map((s) => (
+              paginated.map((s) => (
                 <tr
                   key={s.sale_id}
                   className="odd:bg-white even:bg-gray-50 hover:bg-gray-100"
@@ -153,6 +167,41 @@ export default function SalesHistory() {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 mt-4">
+          <button
+            disabled={currentPage === 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-black/30 bg-white/70 disabled:opacity-50"
+            aria-label="ก่อนหน้า"
+          >
+            ‹
+          </button>
+          {[...Array(totalPages)].map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setPage(i + 1)}
+              className={`w-8 h-8 rounded-lg border ${
+                currentPage === i + 1
+                  ? "bg-indigo-600 text-white"
+                  : "bg-white/70 border-black/30"
+              }`}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            disabled={currentPage === totalPages}
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="w-8 h-8 flex items-center justify-center rounded-lg border border-black/30 bg-white/70 disabled:opacity-50"
+            aria-label="ถัดไป"
+          >
+            ›
+          </button>
+        </div>
+      )}
     </div>
   );
 }

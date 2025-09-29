@@ -1,18 +1,27 @@
-import { Router } from 'express';
-import { createSale, listSales, getSale, listSalesWithItems } from '../controllers/saleController.js';
+// backend/routes/saleRoutes.js
+import { Router } from "express";
+import { requireLogin, requireAdmin } from "../middlewares/authMiddleware.js";
+import {
+  createSale, listSales, getSale, listSalesWithItems,
+  voidSale, refundSale
+} from "../controllers/saleController.js";
 
 const router = Router();
 
-// ✅ เจาะจงก่อน
-router.get('/with-items', listSalesWithItems);
+// สร้างขาย
+router.post("/", requireLogin, createSale);
 
-// รายการทั้งหมด
-router.get('/', listSales);
+// รายการขาย
+router.get("/", requireLogin, listSales);
 
-// ตาม id (ประกาศหลังสุด)
-router.get('/:id', getSale);
+// ต้องมาก่อน "/:id" ไม่งั้นจะโดนจับเป็น id
+router.get("/with-items", requireLogin, listSalesWithItems);
 
-// สร้างรายการขาย
-router.post('/', createSale);
+// ปุ่มยกเลิก/คืนเงิน (เฉพาะแอดมิน)
+router.post("/:id/void", requireAdmin, voidSale);
+router.post("/:id/refund", requireAdmin, refundSale);
+
+// รายละเอียดบิล
+router.get("/:id", requireLogin, getSale);
 
 export default router;

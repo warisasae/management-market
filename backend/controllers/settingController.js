@@ -1,73 +1,68 @@
-// controllers/settingController.js
-import { getSettings, saveSetting } from '../services/settingService.js';
+import { prisma } from "../lib/prisma.js";
 
-/**
- * GET /api/settings
- * ส่งค่าการตั้งค่าทั้งหมดเป็น { settings: { key: value, ... } }
- */
-export async function getAllSettings(req, res, next) {
+// ✅ เพิ่ม vatRate (ปรับเลขตามที่คุณใช้จริง เช่น 7)
+const DEFAULTS = {
+  storeName: "My Grocery",
+  phone: "",
+  address: "",
+  openTime: "07:00",
+  closeTime: "21:00",
+  payCash: true,
+  payPromptPay: true,
+  promptpayNumber: "",
+  printCopies: 1,
+  vatIncluded: false,
+  vatRate: 0,                 // 👈 เพิ่มค่าเริ่มต้น
+  receiptFooter: "ขอบคุณที่อุดหนุน",
+  lowStockThreshold: 3,
+  expiryAlertDays: 7,
+  requireOpenShift: true,
+  shiftFloat: 500,
+};
+
+export async function getSettings(_req, res) {
   try {
-    const settings = await getSettings();
-    // FE Settings.jsx รองรับทั้ง .settings และ plain object
-    // เราส่งแบบ {settings} จะชัวร์สุด
-    res.json({ settings });
-  } catch (e) { next(e); }
+    const row = await prisma.setting.findUnique({ where: { key: "system_basic" } });
+    let data = row?.value ?? DEFAULTS;
+    if (typeof data === "string") { try { data = JSON.parse(data); } catch { data = DEFAULTS; } }
+    // เติมช่องที่ไม่มีให้ครบ (กัน undefined)
+    data = { ...DEFAULTS, ...data };
+    return res.json(data);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Failed to fetch settings" });
+  }
 }
 
-/**
- * GET /api/settings/:key
- * ส่ง { value }
- */
-export async function getSettingByKey(req, res, next) {
+export async function updateSettings(req, res) {
   try {
-    const key = req.params.key;
-    const settings = await getSettings();
-    if (!(key in settings)) {
-      return res.status(404).json({ error: `setting '${key}' not found` });
-    }
-    res.json({ value: settings[key] });
-  } catch (e) { next(e); }
+    const payload = req.body;
+    const saved = await prisma.setting.upsert({
+      where: { key: "system_basic" },
+      create: { key: "system_basic", value: payload },
+      update: { value: payload },
+    });
+    let out = saved.value;
+    if (typeof out === "string") { try { out = JSON.parse(out); } catch {} }
+    // ส่งกลับแบบเติมค่าเริ่มต้นให้ครบ
+    return res.json({ message: "บันทึกการตั้งค่าเรียบร้อย", settings: { ...DEFAULTS, ...out } });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Failed to update settings" });
+  }
 }
 
-/**
- * PUT /api/settings/:key
- * body: { value: string|number }
- */
-export async function putSettingByKey(req, res, next) {
+/** 👇 NEW: สำหรับ POS ที่เรียก /api/settings/vat */
+export async function getVatSettings(_req, res) {
   try {
-    const key = req.params.key;
-    // รองรับทั้ง string/number แปลงเป็น string ก่อนเก็บ
-    const { value } = req.body ?? {};
-    const row = await saveSetting(key, String(value ?? ''));
-    res.json({ key: row.key, value: row.value });
-  } catch (e) { next(e); }
-}
-
-/**
- * PUT /api/settings/bulk
- * body: { shopName, logo, currency, vat, language, ... }
- * ส่งกลับ { settings: {...} }
- */
-export async function putSettingsBulk(req, res, next) {
-  try {
-    const payload = req.body || {};
-    const keys = Object.keys(payload);
-    const results = {};
-    for (const k of keys) {
-      const row = await saveSetting(k, String(payload[k] ?? ''));
-      results[row.key] = row.value;
-    }
-    res.json({ settings: results });
-  } catch (e) { next(e); }
-}
-
-/**
- * (ทางเลือก) GET /api/settings/vat
- * ให้ POS เรียกง่าย ๆ
- */
-export async function getVat(req, res, next) {
-  try {
-    const settings = await getSettings();
-    res.json({ value: settings.vat ?? '0' });
-  } catch (e) { next(e); }
+    const row = await prisma.setting.findUnique({ where: { key: "system_basic" } });
+    let data = row?.value ?? {};
+    if (typeof data === "string") { try { data = JSON.parse(data); } catch { data = {}; } }
+    const vatIncluded = data.vatIncluded ?? DEFAULTS.vatIncluded;
+    const vatRate = data.vatRate ?? DEFAULTS.vatRate; // ปกติ 0 หรือ 7 แล้วแต่ระบบคุณ
+    return res.json({ vatIncluded, vatRate });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Failed to fetch VAT settings" });
+  }
 }

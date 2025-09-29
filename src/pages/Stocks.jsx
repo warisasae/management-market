@@ -1,6 +1,6 @@
-// src/pages/Stocks.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
+import { getCurrentUser, isAdmin as isAdminRole, ensureAuthFromServer } from "../lib/auth";
 
 export default function Stocks() {
   const [entries, setEntries] = useState([]);
@@ -13,6 +13,14 @@ export default function Stocks() {
   const [loading, setLoading] = useState(false);
   const [hint, setHint] = useState("");
 
+  const [actorOptions, setActorOptions] = useState(["ทั้งหมด"]);
+  const [me, setMe] = useState(null);
+  const [canEdit, setCanEdit] = useState(false);
+
+  // ===== Pagination =====
+  const [page, setPage] = useState(1);
+  const PER_PAGE = 10;
+
   const barcodeRef = useRef(null);
   const typeRef = useRef(null);
   const qtyRef = useRef(null);
@@ -20,39 +28,65 @@ export default function Stocks() {
   // utils
   const isBarcode = (s) => /^\d{6,}$/.test(String(s).trim());
 
+  // โหลด user/สิทธิ์ครั้งแรก (sync จาก server เพื่อกันกรณี local ว่างแต่คุกกี้ยัง valid)
+  useEffect(() => {
+    (async () => {
+      const serverUser = await ensureAuthFromServer(); // จะ setAuth ให้ด้วยถ้า valid
+      const u = serverUser || getCurrentUser();
+      setMe(u || null);
+      setCanEdit(!!u && isAdminRole());
+    })();
+  }, []);
+
   /** โหลดประวัติ stock จาก backend */
   async function loadStockHistory() {
     try {
-      // ❗️baseURL เป็น /api แล้ว จึงใช้ path สั้น ๆ
       const res = await api.get("/stocks");
-      const rows = (res.data || []).map((r) => ({
-        id: r.stock_id,
-        date: new Date(r.timestamp).toISOString().slice(0, 10),
-        code: r.product?.barcode || "",
-        name: r.product?.product_name || "(ไม่พบชื่อสินค้า)",
-        type: r.change_type === "IN" ? "รับเข้า" : r.change_type === "OUT" ? "เบิกออก" : "ปรับยอด",
-        qty: Math.abs(Number(r.quantity || 0)),
-        rawQty: Number(r.quantity || 0),
-        user: r.user?.username || r.user?.name || "—",
-      }));
+      const rows = (res.data || [])
+        .map((r) => ({
+          id: r.stock_id,
+          date: new Date(r.timestamp).toISOString().slice(0, 10),
+          code: r.product?.barcode || "",
+          name: r.product?.product_name || "(ไม่พบชื่อสินค้า)",
+          type: r.change_type === "IN" ? "รับเข้า" : r.change_type === "OUT" ? "เบิกออก" : "ปรับยอด",
+          qty: Math.abs(Number(r.quantity ?? 0)),
+          rawQty: Number(r.quantity ?? 0),
+          user: r.user?.username || r.user?.name || "—",
+          ts: new Date(r.timestamp).getTime() || 0,
+        }))
+        .sort((a, b) => b.ts - a.ts);
       setEntries(rows);
     } catch (e) {
       console.error(e);
-      setHint("โหลดประวัติไม่สำเร็จ");
+      setHint(e?.response?.data?.error || "โหลดประวัติไม่สำเร็จ");
     }
   }
 
+  // โหลดครั้งแรก
   useEffect(() => {
-    barcodeRef.current?.focus();
     loadStockHistory();
   }, []);
 
-  // รายชื่อผู้ใช้สำหรับ filter dropdown
-  const userOptions = useMemo(() => {
-    const set = new Set(entries.map((e) => e.user).filter(Boolean));
-    return ["ทั้งหมด", ...Array.from(set)];
-  }, [entries]);
+  // โฟกัสช่องบาร์โค้ดสำหรับแอดมินเท่านั้น
+  useEffect(() => {
+    if (canEdit) barcodeRef.current?.focus();
+  }, [canEdit]);
 
+  // โหลดรายชื่อผู้บันทึกทั้งหมดสำหรับ dropdown
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await api.get("/stocks/actors");
+        const names = (res.data || []).map((u) => u.username || u.name || "—");
+        setActorOptions(["ทั้งหมด", ...Array.from(new Set(names))]);
+      } catch (e) {
+        console.error(e);
+        setActorOptions(["ทั้งหมด"]);
+      }
+    })();
+  }, []);
+
+  // กรองรายการแสดง
   const filtered = useMemo(() => {
     return entries.filter((e) => {
       const matchText =
@@ -65,6 +99,17 @@ export default function Stocks() {
     });
   }, [entries, q, filterType, filterUser]);
 
+  // รีเซ็ตหน้าเมื่อมีการค้นหา/เปลี่ยนตัวกรอง/จำนวนรายการเปลี่ยน
+  useEffect(() => {
+    setPage(1);
+  }, [q, filterType, filterUser, entries.length]);
+
+  // slice ตามหน้า
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const currentPage = Math.min(page, totalPages);
+  const start = (currentPage - 1) * PER_PAGE;
+  const paginated = filtered.slice(start, start + PER_PAGE);
+
   /** ค้นหาสินค้าด้วย barcode */
   async function fetchProductByBarcode(barcode) {
     const res = await api.get(`/products/barcode/${encodeURIComponent(barcode)}`, {
@@ -74,13 +119,22 @@ export default function Stocks() {
     return res.data;
   }
 
-  /** submit ฟอร์ม → สร้าง stock transaction */
+  /** submit ฟอร์ม → สร้าง stock transaction (เฉพาะแอดมิน) */
   const saveEntry = async (e) => {
     e.preventDefault();
-    const barcode = String(form.barcode || "").trim();
-    const qty = Number(form.qty);
 
-    if (!barcode || !form.type || !qty) return;
+    if (!canEdit) {
+      setHint("บัญชีของคุณไม่มีสิทธิ์ปรับสต็อก");
+      return;
+    }
+
+    const barcode = form.barcode.trim();
+    const qtyNum = Number(form.qty);
+
+    if (!barcode || !form.type || !qtyNum || Number.isNaN(qtyNum) || qtyNum <= 0) {
+      setHint("กรุณากรอกข้อมูลให้ครบ (จำนวนต้องมากกว่า 0)");
+      return;
+    }
 
     if (!isBarcode(barcode)) {
       setHint("กรุณาสแกน/กรอกบาร์โค้ดเท่านั้น");
@@ -101,52 +155,61 @@ export default function Stocks() {
       // 2) map ประเภท
       const change_type = form.type === "รับเข้า" ? "IN" : form.type === "เบิกออก" ? "OUT" : "ADJUST";
 
-      // 2.1 user_id จาก localStorage
-      const rawUser = localStorage.getItem("user");
-      const actor = rawUser ? JSON.parse(rawUser) : null;
-      const user_id = actor?.user_id || null;
-
+      // 3) Payload — ไม่ส่ง user_id ให้ server ดึงจาก session เอง
+      const qtyForServer =
+        change_type === "OUT" ? Math.abs(qtyNum) : qtyNum; // ถ้า server ต้องการติดลบ ให้ใช้: (change_type === "OUT" ? -Math.abs(qtyNum) : Math.abs(qtyNum))
       const payload = {
         product_id: product.product_id,
         change_type,
-        quantity: change_type === "OUT" ? Math.abs(qty) : qty, // ตัว controller จะใส่ +/- เอง
+        quantity: qtyForServer,
         note: form.note || null,
-        user_id,
       };
 
-      // 3) ยิง create
+      // 4) ยิง create
       const res = await api.post("/stocks", payload);
       const createdTx = res.data?.transaction || res.data;
 
-      // 4) อัปเดตตารางหน้า UI
+      // ข้อมูลตอบกลับจำเป็นขั้นต่ำ
+      if (!createdTx || !createdTx.stock_id) {
+        throw new Error(res.data?.error || "เซิร์ฟเวอร์ไม่ส่งข้อมูลธุรกรรมกลับมา");
+      }
+
+      const currentUser = me || getCurrentUser();
+
+      // 5) อัปเดต UI (optimistic หลังสำเร็จจริง)
       setEntries((prev) => [
         {
           id: createdTx.stock_id,
           date: new Date(createdTx.timestamp || Date.now()).toISOString().slice(0, 10),
           code: product.barcode || barcode,
-          name: product.product_name,
+          name: product.product_name || "(ไม่พบชื่อสินค้า)",
           type: form.type,
-          qty: Math.abs(qty),
-          rawQty:
-            Number(createdTx.quantity ?? (change_type === "OUT" ? -Math.abs(qty) : Math.abs(qty))),
-          user: createdTx.user?.username || createdTx.user?.name || actor?.username || "—",
+          qty: Math.abs(qtyNum),
+          rawQty: Number(createdTx.quantity ?? qtyForServer),
+          user: createdTx.user?.username || currentUser?.username || "—",
+          ts: new Date(createdTx.timestamp || Date.now()).getTime(),
         },
         ...prev,
       ]);
 
-      setHint(`บันทึก ${form.type} "${product.product_name}" จำนวน ${qty} สำเร็จ`);
+      setHint(`บันทึก ${form.type} "${product.product_name}" จำนวน ${qtyNum} สำเร็จ`);
       setForm({ barcode: "", type: "", qty: "", note: "" });
       barcodeRef.current?.focus();
     } catch (err) {
       console.error(err);
-      setHint(err?.response?.data?.error || "บันทึกไม่สำเร็จ");
+      const msg =
+        err?.response?.data?.error ||
+        err?.message ||
+        "บันทึกไม่สำเร็จ";
+      setHint(msg);
     } finally {
       setLoading(false);
     }
   };
 
-  // Enter ที่ช่องบาร์โค้ด → ถ้าข้อมูลครบให้บันทึกเลย
+  // Enter ที่ช่องบาร์โค้ด → ถ้าข้อมูลครบให้บันทึกเลย (เฉพาะแอดมิน)
   const onBarcodeKeyDown = (e) => {
+    if (!canEdit) return;
     if (e.key === "Enter") {
       e.preventDefault();
       if (!form.type) return typeRef.current?.focus();
@@ -163,80 +226,83 @@ export default function Stocks() {
 
   return (
     <div className="min-h-screen p-4 sm:p-6">
-      {/* ฟอร์มบันทึก */}
-      <section className="mb-6">
-        <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 mb-3">
-          บันทึกการรับเข้า / เบิกออกสินค้า
-        </h2>
+      {/* ฟอร์มบันทึก (แสดงเฉพาะแอดมิน) */}
+      {canEdit && (
+        <section className="mb-6">
+          <h2 className="text-xl sm:text-2xl font-extrabold text-gray-900 mb-3">
+            บันทึกการรับเข้า / เบิกออกสินค้า
+          </h2>
 
-        <form
-          onSubmit={saveEntry}
-          className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_auto] gap-3 rounded-xl p-3"
-        >
-          <input
-            ref={barcodeRef}
-            placeholder="สแกนบาร์โค้ด (กด Enter)"
-            value={form.barcode}
-            onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
-            onKeyDown={onBarcodeKeyDown}
-            disabled={loading}
-            className={ctrl}
-          />
-
-          <select
-            ref={typeRef}
-            value={form.type}
-            onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
-            disabled={loading}
-            className={ctrl}
+          <form
+            onSubmit={saveEntry}
+            className="grid grid-cols-1 sm:grid-cols-[2fr_1fr_1fr_auto] gap-3 rounded-xl p-3"
           >
-            <option value="">เลือกประเภท</option>
-            <option value="รับเข้า">รับเข้า</option>
-            <option value="เบิกออก">เบิกออก</option>
-          </select>
+            <input
+              ref={barcodeRef}
+              placeholder="สแกนบาร์โค้ด (กด Enter)"
+              value={form.barcode}
+              onChange={(e) => setForm((f) => ({ ...f, barcode: e.target.value }))}
+              onKeyDown={onBarcodeKeyDown}
+              disabled={loading}
+              className={ctrl}
+            />
 
-          <input
-            ref={qtyRef}
-            type="number"
-            min="1"
-            placeholder="จำนวน"
-            value={form.qty}
-            onChange={(e) => setForm((f) => ({ ...f, qty: e.target.value }))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                if (form.barcode.trim() && form.type && form.qty) saveEntry(e);
-              }
-            }}
-            disabled={loading}
-            className={ctrl}
-          />
+            <select
+              ref={typeRef}
+              value={form.type}
+              onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
+              disabled={loading}
+              className={ctrl}
+            >
+              <option value="">เลือกประเภท</option>
+              <option value="รับเข้า">รับเข้า</option>
+              <option value="เบิกออก">เบิกออก</option>
+            </select>
 
-          <button
-            type="submit"
-            disabled={!form.barcode.trim() || !form.type || !form.qty || loading}
-            className={`${btn} ${btnPrimary}`}
-          >
-            {loading ? "กำลังบันทึก..." : "บันทึก"}
-          </button>
-        </form>
+            <input
+              ref={qtyRef}
+              type="number"
+              min="1"
+              placeholder="จำนวน"
+              value={form.qty}
+              onChange={(e) => setForm((f) => ({ ...f, qty: e.target.value }))}
+              onKeyDown={(e) => {
+                if (!canEdit) return;
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  if (form.barcode.trim() && form.type && form.qty) saveEntry(e);
+                }
+              }}
+              disabled={loading}
+              className={ctrl}
+            />
 
-        <div className="mt-2">
-          <input
-            placeholder="หมายเหตุ (ไม่บังคับ)"
-            value={form.note}
-            onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-            disabled={loading}
-            className={ctrl + " w-full"}
-          />
-        </div>
+            <button
+              type="submit"
+              disabled={!form.barcode.trim() || !form.type || !form.qty || loading}
+              className={`${btn} ${btnPrimary}`}
+            >
+              {loading ? "กำลังบันทึก..." : "บันทึก"}
+            </button>
+          </form>
 
-        {hint && (
-          <div className="mt-2 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg">
-            {hint}
+          <div className="mt-2">
+            <input
+              placeholder="หมายเหตุ (ไม่บังคับ)"
+              value={form.note}
+              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+              disabled={loading}
+              className={ctrl + " w-full"}
+            />
           </div>
-        )}
-      </section>
+
+          {hint && (
+            <div className="mt-2 text-sm text-green-700 bg-green-50 border border-green-200 px-3 py-2 rounded-lg">
+              {hint}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ค้นหาและกรอง */}
       <section className="mb-3">
@@ -248,14 +314,23 @@ export default function Stocks() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <select className={ctrl} value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+          <select
+            className={ctrl}
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+          >
             <option>ทั้งหมด</option>
             <option>รับเข้า</option>
             <option>เบิกออก</option>
           </select>
 
-          <select className={ctrl} value={filterUser} onChange={(e) => setFilterUser(e.target.value)}>
-            {userOptions.map((u) => (
+          {/* ใช้ actorOptions + filterUser */}
+          <select
+            className={ctrl}
+            value={filterUser}
+            onChange={(e) => setFilterUser(e.target.value)}
+          >
+            {actorOptions.map((u) => (
               <option key={u} value={u}>
                 ผู้บันทึก: {u}
               </option>
@@ -265,7 +340,7 @@ export default function Stocks() {
       </section>
 
       {/* ตารางประวัติ */}
-      <div className="bg-white rounded-2xl shadow-sm p-3">
+      
         <div className="overflow-hidden rounded-xl">
           <table className="w-full text-sm">
             <thead>
@@ -278,7 +353,7 @@ export default function Stocks() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {filtered.map((e) => (
+              {paginated.map((e) => (
                 <tr key={e.id} className="odd:bg-white even:bg-gray-50">
                   <td className="px-4 py-2 text-gray-800">{e.date}</td>
                   <td className="px-4 py-2 text-gray-800">
@@ -294,14 +369,12 @@ export default function Stocks() {
                       <span className="text-gray-800">ปรับยอด</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 font-semibold">
-                    {e.type === "เบิกออก" ? `-${e.qty}` : `+${e.qty}`}
-                  </td>
+                  <td className="px-4 py-2 font-semibold">{e.qty}</td>
                   <td className="px-4 py-2 text-gray-800">{e.user}</td>
                 </tr>
               ))}
 
-              {filtered.length === 0 && (
+              {paginated.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-6 text-center text-gray-400">
                     ไม่มีข้อมูล
@@ -311,7 +384,47 @@ export default function Stocks() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="w-8 h-8 flex items-center justify-center rounded-xl border border-black/10 bg-white disabled:opacity-50"
+              aria-label="Previous"
+              title="ก่อนหน้า"
+            >
+              ‹
+            </button>
+
+            {Array.from({ length: totalPages }).map((_, i) => {
+              const n = i + 1;
+              const active = n === currentPage;
+              return (
+                <button
+                  key={n}
+                  onClick={() => setPage(n)}
+                  className={`w-8 h-8 rounded-xl border ${
+                    active ? "bg-violet-600 text-white border-violet-600" : "bg-white border-black/10"
+                  }`}
+                >
+                  {n}
+                </button>
+              );
+            })}
+
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-xl border border-black/10 bg-white disabled:opacity-50"
+              aria-label="Next"
+              title="ถัดไป"
+            >
+              ›
+            </button>
+          </div>
+        )}
       </div>
-    </div>
   );
 }
