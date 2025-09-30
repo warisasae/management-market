@@ -9,11 +9,18 @@ const THB = (n) =>
     minimumFractionDigits: 2,
   });
 
-// *** NOTE: ต้องเพิ่มการโหลด/ตรวจสอบบทบาทของผู้ใช้จริงในแอปพลิเคชันของคุณ ***
-// ตัวอย่าง: ถ้าผู้ใช้มี role เป็น "employee" ให้ค่าเป็น true
-const isEmployeeRole = true; // <--- สมมติว่านี่คือ role ของพนักงาน
-// ถ้ามีข้อมูล role ผู้ใช้ ให้เปลี่ยนเป็น:
-// const isEmployeeRole = sale.user?.role === 'employee'; // หรือดึงมาจาก global state
+// *** เพิ่ม: ฟังก์ชันสำหรับดึง Role ของผู้ใช้จาก localStorage ***
+const getCurrentUserRole = () => {
+  try {
+    const raw = localStorage.getItem("user");
+    const user = raw ? JSON.parse(raw) : null;
+    return user?.role || "guest"; // คืนค่า role (เช่น "admin", "employee", "guest")
+  } catch {
+    return "guest";
+  }
+};
+
+// ❌ ลบ: ตัวแปร isEmployeeRole ที่กำหนดเป็น true ถาวรออกไป
 
 export default function SaleDetail() {
   const { id } = useParams();
@@ -24,6 +31,10 @@ export default function SaleDetail() {
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  // 🛠️ เพิ่ม: ดึง Role ของผู้ใช้ปัจจุบัน
+  const userRole = getCurrentUserRole();
+  const isAdmin = userRole === "ADMIN"; // ตรวจสอบว่าเป็น Admin หรือไม่
 
   // DOM ใบเสร็จสำหรับพิมพ์เฉพาะส่วน
   const receiptRef = useRef(null);
@@ -76,9 +87,9 @@ export default function SaleDetail() {
 
     const html = node.outerHTML;
 
-    // สไตล์ขั้นต่ำสำหรับหน้าพิมพ์ (ไม่พึ่ง tailwind)
+    // สไตล์ขั้นต่ำสำหรับหน้าพิมพ์ (ปรับให้เป็น 50mm)
     const styles = `
- <style>
+    <style>
     /* 1. สไตล์พื้นฐาน: ลบ margin/padding ทั้งหมด */
     *{box-sizing:border-box}
     html, body{
@@ -113,15 +124,15 @@ export default function SaleDetail() {
     overflow: hidden; 
     text-overflow: ellipsis; 
     /* 🚨 เปลี่ยนตรงนี้: ลดจาก 65% เพื่อให้ราคาด้านขวามีพื้นที่ */
-    max-width: 45% !important; 
+    max-width: 42% !important; 
     display: inline-block; 
 }
     /* คงสไตล์ของข้อความและเส้นประไว้ */
     .border-dashed{border-top:1px dashed #d1d5db}
     .text-center{text-align:center}
     .text-right{text-align:right}
-    .text-sm{font-size:14px;line-height:1.25}
-    .text-xs{font-size:12px;line-height:1.25}
+    .text-sm{font-size:12px;line-height:1.25}
+    .text-xs{font-size:10px;line-height:1.25}
     .font-bold{font-weight:700}
     .leading-5{line-height:1.25}
     .mb-3{margin-bottom:12px}
@@ -133,7 +144,7 @@ export default function SaleDetail() {
 
     /* 4. @page: การตั้งค่าหน้าพิมพ์ (สำคัญที่สุด) */
     @page{
-      /* กำหนดขนาดหน้าพิมพ์: 48mm กว้าง, auto สูง */
+      /* กำหนดขนาดหน้าพิมพ์: 40mm กว้าง, auto สูง */
       size: 50mm auto; 
       /* ลบ margin ของหน้าพิมพ์ที่เบราว์เซอร์จะใส่เข้ามา */
       margin: 0; 
@@ -310,22 +321,22 @@ export default function SaleDetail() {
             <div>POS#{sale.sale_id}</div>
             <div className="mt-2 border-t border-dashed" />
           </div>
-         <div className="text-sm mb-3 space-y-1 px-2"> {/* 👈 ปรับจาก px-1 เป็น px-2 เพื่อขอบที่เห็นชัดเจนขึ้น */}
-            {items.map((it, idx) => {
-              const p = it.product || {};
-              const name = p.product_name || p.name || p.title || p.barcode || "-";
-              const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
-              return (
-                <div key={idx} className="flex justify-between">
-                  {/* ชื่อสินค้า: ใช้คลาส item-name-no-wrap เพื่อบังคับตัดคำและแสดง ... */}
-                  <span className="item-name-no-wrap" style={{ marginRight: '8px' }}>
-                    {name} x{it.quantity}
-                  </span>
-                  <span className="text-right shrink-0">{THB(lineTotal)}</span>
-                </div>
-              );
-            })}
-          </div>
+          <div className="text-sm mb-3 space-y-1 px-2">
+            {items.map((it, idx) => {
+              const p = it.product || {};
+              const name = p.product_name || p.name || p.title || p.barcode || "-";
+              const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
+              return (
+                <div key={idx} className="flex justify-between">
+                  {/* ชื่อสินค้า: ใช้คลาส item-name-no-wrap เพื่อบังคับตัดคำและแสดง ... */}
+                  <span className="item-name-no-wrap" style={{ marginRight: '8px' }}>
+                    {name} x{it.quantity}
+                  </span>
+                  <span className="text-right shrink-0">{THB(lineTotal)}</span>
+                </div>
+              );
+            })}
+          </div>
 
           <div className="border-t border-dashed my-2 px-1" />
 
@@ -374,8 +385,8 @@ export default function SaleDetail() {
                 🖨️ พิมพ์
               </button>
 
-              {/* ปุ่มคืนเงิน - ซ่อนถ้าเป็น role พนักงาน */}
-              {!isEmployeeRole && (
+              {/* 🛠️ แก้ไข: ปุ่มคืนเงิน - แสดงเมื่อเป็น Admin เท่านั้น */}
+              {isAdmin && (
                 <button
                   onClick={handleRefund}
                   className="min-w-[140px] h-11 px-5 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
@@ -386,8 +397,8 @@ export default function SaleDetail() {
                 </button>
               )}
 
-              {/* ปุ่มยกเลิกบิล - ซ่อนถ้าเป็น role พนักงาน */}
-              {!isEmployeeRole && (
+              {/* 🛠️ แก้ไข: ปุ่มยกเลิกบิล - แสดงเมื่อเป็น Admin เท่านั้น */}
+              {isAdmin && (
                 <button
                   onClick={handleVoid}
                   className="min-w-[140px] h-11 px-5 rounded-lg bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
