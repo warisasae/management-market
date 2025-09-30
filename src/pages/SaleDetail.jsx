@@ -78,27 +78,80 @@ export default function SaleDetail() {
 
     // สไตล์ขั้นต่ำสำหรับหน้าพิมพ์ (ไม่พึ่ง tailwind)
     const styles = `
-      <style>
-        *{box-sizing:border-box}
-        html,body{margin:0;padding:0;background:#fff;color:#0f172a;font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
-        .receipt{width:360px;margin:12px auto;border:1px solid #e5e7eb;border-radius:12px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-        .border-dashed{border-top:1px dashed #d1d5db}
-        .text-center{text-align:center}
-        .text-right{text-align:right}
-        .text-sm{font-size:14px;line-height:1.25}
-        .text-xs{font-size:12px;line-height:1.25}
-        .font-bold{font-weight:700}
-        .leading-5{line-height:1.25}
-        .mb-3{margin-bottom:12px}
-        .mt-1{margin-top:4px}
-        .mt-2{margin-top:8px}
-        .space-y-1 > * + *{margin-top:4px}
-        .flex{display:flex}
-        .justify-between{justify-content:space-between}
-        @page{size:auto;margin:10mm}
-        @media print{body{padding:0}}
-      </style>
-    `;
+ <style>
+    /* 1. สไตล์พื้นฐาน: ลบ margin/padding ทั้งหมด */
+    *{box-sizing:border-box}
+    html, body{
+        margin:0;
+        padding:0;
+        background:#fff;
+        color:#0f172a;
+        font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
+        /* สำคัญ: บังคับความกว้างของหน้าให้เป็น 58mm ในขณะพิมพ์ */
+        width: 50mm; 
+    }
+    
+    /* 2. สไตล์ .receipt: กำหนดความกว้างจริงและลบขอบที่ไม่ต้องการ */
+    .receipt{
+      /* *** เปลี่ยนจาก width:360px เป็นขนาดสำหรับ 58mm *** */
+      width: 50mm;
+      margin: 0; /* ลบ margin:12px auto */
+      border: 0; /* ลบ border:1px */
+      border-radius: 0; /* ลบ border-radius:12px */
+      padding: 0; /* ลบ padding:16px */
+      box-shadow: none; /* ลบ box-shadow */
+    }
+    
+    /* 3. สไตล์เนื้อหาภายใน: หากต้องการ padding ด้านข้าง ให้เพิ่มเข้าไป */
+    .receipt > div, .receipt > div.text-sm, .receipt > div.text-xs {
+       /* เพิ่ม padding ซ้ายขวาเล็กน้อย (เช่น 2-4px) ให้เนื้อหาด้านใน */
+       padding: 0 2px; 
+    }
+    /* 4. สไตล์ชื่อสินค้า: บังคับให้เป็น 1 บรรทัดและตัดคำเมื่อเกิน */
+.item-name-no-wrap {
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+    /* 🚨 เปลี่ยนตรงนี้: ลดจาก 65% เพื่อให้ราคาด้านขวามีพื้นที่ */
+    max-width: 45% !important; 
+    display: inline-block; 
+}
+    /* คงสไตล์ของข้อความและเส้นประไว้ */
+    .border-dashed{border-top:1px dashed #d1d5db}
+    .text-center{text-align:center}
+    .text-right{text-align:right}
+    .text-sm{font-size:14px;line-height:1.25}
+    .text-xs{font-size:12px;line-height:1.25}
+    .font-bold{font-weight:700}
+    .leading-5{line-height:1.25}
+    .mb-3{margin-bottom:12px}
+    .mt-1{margin-top:4px}
+    .mt-2{margin-top:8px}
+    .space-y-1 > * + *{margin-top:4px}
+    .flex{display:flex}
+    .justify-between{justify-content:space-between}
+
+    /* 4. @page: การตั้งค่าหน้าพิมพ์ (สำคัญที่สุด) */
+    @page{
+      /* กำหนดขนาดหน้าพิมพ์: 48mm กว้าง, auto สูง */
+      size: 50mm auto; 
+      /* ลบ margin ของหน้าพิมพ์ที่เบราว์เซอร์จะใส่เข้ามา */
+      margin: 0; 
+    }
+    
+    @media print{
+        html, body, .receipt {
+            width: 50mm !important;
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+        /* ซ่อนส่วนอื่นๆ ที่ไม่ต้องการพิมพ์ */
+        .print\\:hidden, .print\\:hidden * {
+            display: none !important;
+        }
+    }
+  </style>
+`;
 
     const iframe = document.createElement("iframe");
     Object.assign(iframe.style, {
@@ -184,8 +237,6 @@ export default function SaleDetail() {
 
   // ---------- settings ----------
   const storeName = settings?.storeName || sale.store?.name || "My Grocery Store";
-  const taxId = settings?.taxId || sale.store?.tax_id || "0107542000011";
-  const vatCode = settings?.vatCode || sale.store?.vat_code || "00639";
   const footerText = settings?.receiptFooter || sale.receipt_footer || "** ขอบคุณที่ใช้บริการ **";
   const vatIncluded = sale.vat_included ?? settings?.vatIncluded ?? false;
   const rawRate = sale.vat_rate ?? settings?.vatRate ?? 0;
@@ -254,34 +305,31 @@ export default function SaleDetail() {
       {/* ใบเสร็จ (พิมพ์เฉพาะส่วนนี้) */}
       <div className="max-w-md mx-auto">
         <div ref={receiptRef} className="receipt bg-white p-4 shadow ring-1 ring-gray-200 rounded-lg">
-          <div className="text-center text-sm leading-5 mb-3">
+          <div className="text-center text-sm leading-5 mb-1">
             <div className="font-bold">{storeName}</div>
             <div>POS#{sale.sale_id}</div>
-            <div className="text-[11px] text-gray-500 mt-1">
-              เลขประจำตัวผู้เสียภาษี: {taxId} &nbsp;|&nbsp; รหัสสาขา: {vatCode}
-            </div>
             <div className="mt-2 border-t border-dashed" />
           </div>
+         <div className="text-sm mb-3 space-y-1 px-2"> {/* 👈 ปรับจาก px-1 เป็น px-2 เพื่อขอบที่เห็นชัดเจนขึ้น */}
+            {items.map((it, idx) => {
+              const p = it.product || {};
+              const name = p.product_name || p.name || p.title || p.barcode || "-";
+              const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
+              return (
+                <div key={idx} className="flex justify-between">
+                  {/* ชื่อสินค้า: ใช้คลาส item-name-no-wrap เพื่อบังคับตัดคำและแสดง ... */}
+                  <span className="item-name-no-wrap" style={{ marginRight: '8px' }}>
+                    {name} x{it.quantity}
+                  </span>
+                  <span className="text-right shrink-0">{THB(lineTotal)}</span>
+                </div>
+              );
+            })}
+          </div>
 
-          <div className="text-sm mb-3">
-            {items.map((it, idx) => {
-              const p = it.product || {};
-              const name = p.product_name || p.name || p.title || p.barcode || "-";
-              const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
-              return (
-                <div key={idx} className="flex justify-between">
-                  <span>
-                    {name} x{it.quantity}
-                  </span>
-                  <span>{THB(lineTotal)}</span>
-                </div>
-              );
-            })}
-          </div>
+          <div className="border-t border-dashed my-2 px-1" />
 
-          <div className="border-t border-dashed my-2" />
-
-          <div className="text-sm space-y-1">
+          <div className="text-sm space-y-1 px-1">
             <div className="flex justify-between">
               <span>ยอดรวม</span>
               <span>{THB(subTotal)}</span>
@@ -300,10 +348,10 @@ export default function SaleDetail() {
             </div>
           </div>
 
-          <div className="border-t border-dashed my-2" />
-          <div className="text-xs text-center space-y-1">
+          <div className="border-t border-dashed my-2 px-1" />
+          <div className="text-xs text-center space-y-1 px-1">
             <div>
-              #{sale.sale_id} {sale.created_at ? new Date(sale.created_at).toLocaleString("th-TH") : ""}
+             {sale.created_at ? new Date(sale.created_at).toLocaleString("th-TH") : ""}
             </div>
             <div>พนักงาน: {sale.user?.name || sale.user?.username || "-"}</div>
             <div className="mt-1">{footerText}</div>

@@ -199,6 +199,7 @@ export default function Checkout() {
   const completeTransaction = () => {
     setShow(false); // ปิด Modal
     sessionStorage.removeItem("mm_checkout"); 
+    navigate("/dashboard/pos");
   };
 
   // กดชำระเงิน -> บันทึกลง DB

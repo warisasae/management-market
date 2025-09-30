@@ -330,7 +330,7 @@ export default function ProductForm() {
                                         value={form.note}
                                         onChange={(e) => onChange("note", e.target.value)}
                                         className="mt-2 w-full rounded-lg border px-3 py-2 resize-y"
-                                        placeholder="(ตัวเลือก) จดบันทึกเฉพาะภายใน ไม่ถูกส่งไป backend"
+                                        placeholder=""
                                     />
                                 </div>
                             </div>
