@@ -120,12 +120,15 @@ export default function Login() {
       </div>
 
       {/* RIGHT: branding */}
-      <div className="bg-[#F56E74] flex items-center justify-center px-6 py-10">
+      <div className="bg-[#FF6969] flex items-center justify-center px-6 py-10">
         <div className="text-center">
-          <img src="/path/to/logo.png" alt="Logo" className="mx-auto w-72 mb-6" />
-          <div className="font-extrabold tracking-wider text-[56px] md:text-[72px] text-[#D9C44A] mb-4">
-            ระฆังทอง
-          </div>
+          <img src="src/images/bell.jpg" alt="Logo" className="mx-auto w-[500px] mb-6" />
+          <div className="font-extrabold tracking-widest text-[56px] md:text-[72px] text-[#D9C44A]">
+        ระฆังทอง
+    </div>
+    <div className="font-semibold tracking-[0.5em] text-[10px] md:text-[24px] text-white -mt-2">
+        GROCERY STORE
+    </div>
         </div>
       </div>
     </div>

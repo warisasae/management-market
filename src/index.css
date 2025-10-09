@@ -1,1 +1,19 @@
-@import "tailwindcss";
+/* src/index.css */
+
+/* 1. คำสั่ง @import ที่โหลดไฟล์ฟอนต์ (ต้องอยู่บนสุด) */
+@import url('./font-override.css'); 
+
+/* 2. คำสั่ง @import ที่โหลด Tailwind CSS (ต้องตามมาติด ๆ) */
+@import "tailwindcss"; 
+
+/* 3. โค้ด CSS ที่กำหนดฟอนต์ (ต้องอยู่ถัดจาก @import ทั้งหมด) */
+:root {
+  /* กำหนดค่าตัวแปร CSS เพื่อแทนที่ฟอนต์เริ่มต้นของเฟรมเวิร์ก */
+  --default-font-family: 'Noto Sans Thai', sans-serif !important;
+}
+
+/* 4. การกำหนดฟอนต์ให้กับองค์ประกอบที่สำคัญทั้งหมด */
+*, ::before, ::after, input, textarea, button, select, a, p, h1, h2, h3, h4, h5, h6 {
+  /* ใช้ตัวแปรที่เรากำหนดค่าใหม่ เพื่อให้ฟอนต์มีผลแน่นอน */
+  font-family: var(--default-font-family) !important;
+}
