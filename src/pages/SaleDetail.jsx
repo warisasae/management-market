@@ -4,9 +4,9 @@ import { api } from "../lib/api";
 
 const THB = (n) =>
   (Number(n) || 0).toLocaleString("th-TH", {
-    style: "currency",
-    currency: "THB",
+    style: "decimal",
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   });
 
 // *** เพิ่ม: ฟังก์ชันสำหรับดึง Role ของผู้ใช้จาก localStorage ***
@@ -89,79 +89,91 @@ export default function SaleDetail() {
 
     // สไตล์ขั้นต่ำสำหรับหน้าพิมพ์ (ปรับให้เป็น 50mm)
     const styles = `
-    <style>
-    /* 1. สไตล์พื้นฐาน: ลบ margin/padding ทั้งหมด */
-    *{box-sizing:border-box}
-    html, body{
-        margin:0;
-        padding:0;
-        background:#fff;
-        color:#0f172a;
-        font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;
-        /* สำคัญ: บังคับความกว้างของหน้าให้เป็น 58mm ในขณะพิมพ์ */
-        width: 50mm; 
-    }
-    
-    /* 2. สไตล์ .receipt: กำหนดความกว้างจริงและลบขอบที่ไม่ต้องการ */
-    .receipt{
-      /* *** เปลี่ยนจาก width:360px เป็นขนาดสำหรับ 58mm *** */
-      width: 50mm;
-      margin: 0; /* ลบ margin:12px auto */
-      border: 0; /* ลบ border:1px */
-      border-radius: 0; /* ลบ border-radius:12px */
-      padding: 0; /* ลบ padding:16px */
-      box-shadow: none; /* ลบ box-shadow */
-    }
-    
-    /* 3. สไตล์เนื้อหาภายใน: หากต้องการ padding ด้านข้าง ให้เพิ่มเข้าไป */
-    .receipt > div, .receipt > div.text-sm, .receipt > div.text-xs {
-       /* เพิ่ม padding ซ้ายขวาเล็กน้อย (เช่น 2-4px) ให้เนื้อหาด้านใน */
-       padding: 0 2px; 
-    }
-    /* 4. สไตล์ชื่อสินค้า: บังคับให้เป็น 1 บรรทัดและตัดคำเมื่อเกิน */
-.item-name-no-wrap {
-    white-space: nowrap; 
-    overflow: hidden; 
-    text-overflow: ellipsis; 
-    /* 🚨 เปลี่ยนตรงนี้: ลดจาก 65% เพื่อให้ราคาด้านขวามีพื้นที่ */
-    max-width: 42% !important; 
-    display: inline-block; 
+  <style>
+    /* 1. สไตล์พื้นฐาน */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
 }
-    /* คงสไตล์ของข้อความและเส้นประไว้ */
-    .border-dashed{border-top:1px dashed #d1d5db}
-    .text-center{text-align:center}
-    .text-right{text-align:right}
-    .text-sm{font-size:12px;line-height:1.25}
-    .text-xs{font-size:10px;line-height:1.25}
-    .font-bold{font-weight:700}
-    .leading-5{line-height:1.25}
-    .mb-3{margin-bottom:12px}
-    .mt-1{margin-top:4px}
-    .mt-2{margin-top:8px}
-    .space-y-1 > * + *{margin-top:4px}
-    .flex{display:flex}
-    .justify-between{justify-content:space-between}
+
+html, body {
+    width: 48mm;
+    background: #fff;
+    color: #0f172a;
+    font-family: monospace, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    /* 👇 เพิ่มบรรทัดนี้: กำหนดความหนาตัวอักษรเป็นปกติ */
+    font-weight: normal;
+    font-variant-numeric: tabular-nums;
+}
+
+/* 2. สไตล์ .receipt */
+.receipt {
+    width: 100%;
+    /* เพิ่ม padding ด้านข้างเป็น 4mm เพื่อสร้างขอบที่ปลอดภัย (แก้ปัญหาพิมพ์ตกขอบ) */
+    padding: 0 1mm 0 0;
+    box-shadow: none;
+    border: 0;
+}
+    
+/* --- สไตล์สำหรับรายการสินค้า (แบบใหม่) --- */
+.item-name {
+    /* ยืดตัวเองให้เต็มพื้นที่ว่าง */
+    flex-grow: 1; 
+    /* บังคับให้อยู่ในบรรทัดเดียว */
+    white-space: nowrap;
+    /* ซ่อนส่วนที่ล้น */
+    overflow: hidden;
+    /* แสดง ... เมื่อข้อความล้น */
+    text-overflow: ellipsis;
+    margin-right: 12px; /* เพิ่มระยะห่างขวา */
+}
+.item-quantity {
+    /* ไม่ต้องยืดหรือหด */
+    flex-shrink: 0;
+    margin-right: 12px;
+}
+.item-price {
+    /* ไม่ต้องยืดหรือหด และจัดข้อความชิดขวา */
+    flex-shrink: 0;
+    text-align: right;
+}
+    
+    /* --- ปรับแก้ขนาดฟอนต์ (สำคัญที่สุด) --- */
+    .border-dashed { border-top: 1px dashed #d1d5db }
+    .text-center { text-align: center }
+    .text-right { text-align: right }
+    /* 👇 ปรับแก้: ลดขนาดฟอนต์ลงเพื่อให้พอดีกับกระดาษ */
+    .text-sm { font-size: 10px; line-height: 1.4; }
+    .text-xs { font-size: 8px; line-height: 1.4; }
+    .font-bold { font-weight: 700 }
+    .leading-5 { line-height: 1.25 }
+    .mb-3 { margin-bottom: 12px }
+    .mt-1 { margin-top: 4px }
+    .mt-2 { margin-top: 8px }
+    .space-y-1 > * + * { margin-top: 4px }
+    .flex { display: flex }
+    .justify-between { justify-content: space-between }
 
     /* 4. @page: การตั้งค่าหน้าพิมพ์ (สำคัญที่สุด) */
-    @page{
-      /* กำหนดขนาดหน้าพิมพ์: 40mm กว้าง, auto สูง */
-      size: 50mm auto; 
-      /* ลบ margin ของหน้าพิมพ์ที่เบราว์เซอร์จะใส่เข้ามา */
-      margin: 0; 
+    @page {
+        size: 48mm auto;
+        margin: 0;
     }
-    
-    @media print{
-        html, body, .receipt {
-            width: 50mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-        }
-        /* ซ่อนส่วนอื่นๆ ที่ไม่ต้องการพิมพ์ */
-        .print\\:hidden, .print\\:hidden * {
+
+    @media print {
+    html, body, .receipt {
+        width: 48mm !important;
+        margin: 0 !important;
+        /* 👇 ปรับแก้: ใช้ padding เดียวกัน */
+        padding: 0 1mm 0 0 !important;
+    }
+
+        .print\:hidden, .print\:hidden * {
             display: none !important;
         }
     }
-  </style>
+</style>
 `;
 
     const iframe = document.createElement("iframe");
@@ -268,13 +280,17 @@ export default function SaleDetail() {
   })();
   const grandTotal = vatIncluded ? subTotal : subTotal + vatAmount;
 
-  const status = sale.status || "PAID";
-  const statusStyle =
+const status = sale.status || "PAID";
+const statusStyle =
     status === "VOID"
-      ? "bg-red-100 text-red-700"
-      : status === "REFUNDED"
-      ? "bg-yellow-100 text-yellow-800"
-      : "bg-emerald-100 text-emerald-700";
+    ? "bg-red-100 text-red-700"
+    : status === "REFUNDED"
+    ? "bg-yellow-100 text-yellow-800"
+    : "bg-emerald-100 text-emerald-700";
+
+// 👇 *** เพิ่ม: สร้างตัวแปรเช็คสถานะเพื่อซ่อน/แสดงปุ่ม ***
+const isActionable = status !== "VOID" && status !== "REFUNDED";
+
 
   return (
     <div className="min-h-screen p-6 from-white to-slate-50">
@@ -321,22 +337,29 @@ export default function SaleDetail() {
             <div>POS#{sale.sale_id}</div>
             <div className="mt-2 border-t border-dashed" />
           </div>
-          <div className="text-sm mb-3 space-y-1 px-2">
-            {items.map((it, idx) => {
-              const p = it.product || {};
-              const name = p.product_name || p.name || p.title || p.barcode || "-";
-              const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
-              return (
-                <div key={idx} className="flex justify-between">
-                  {/* ชื่อสินค้า: ใช้คลาส item-name-no-wrap เพื่อบังคับตัดคำและแสดง ... */}
-                  <span className="item-name-no-wrap" style={{ marginRight: '8px' }}>
-                    {name} x{it.quantity}
-                  </span>
-                  <span className="text-right shrink-0">{THB(lineTotal)}</span>
-                </div>
-              );
-            })}
-          </div>
+         <div className="text-sm mb-3 space-y-1 px-2">
+      {items.map((it, idx) => {
+        const p = it.product || {};
+        const name = p.product_name || p.name || p.title || p.barcode || "-";
+        const lineTotal = (Number(it.quantity) || 0) * (Number(it.price) || 0);
+        return (
+       <div key={idx} className="flex items-start py-1">
+    {/* 👇 เพิ่ม 'item-name' เข้าไปข้างหน้า */}
+    <span className="item-name flex-grow mr-4 truncate">
+        {name}
+    </span>
+    {/* 👇 เพิ่ม 'item-quantity' เข้าไปข้างหน้า */}
+    <span className="item-quantity flex-shrink-0 mr-4">
+        x{it.quantity}
+    </span>
+    {/* 👇 เพิ่ม 'item-price' เข้าไปข้างหน้า */}
+    <span className="item-price flex-shrink-0 text-right font-medium">
+        {THB(lineTotal)}
+    </span>
+</div>
+        );
+      })}
+    </div>
 
           <div className="border-t border-dashed my-2 px-1" />
 
@@ -376,41 +399,43 @@ export default function SaleDetail() {
           <div className="bg-transparent p-0">
             <div className="flex flex-wrap gap-2 justify-center">
               {/* พิมพ์ */}
-              <button
-                onClick={handlePrint}
-                className="min-w-[140px] h-11 px-5 rounded-lg bg-slate-900 text-white hover:opacity-90"
-                disabled={busy}
-                title="พิมพ์ใบเสร็จ"
-              >
-                🖨️ พิมพ์
-              </button>
+              {isActionable && (
+                    <button
+                        onClick={handlePrint}
+                        className="min-w-[140px] h-11 px-5 rounded-lg bg-slate-900 text-white hover:opacity-90"
+                        disabled={busy}
+                        title="พิมพ์ใบเสร็จ"
+                    >
+                        🖨️ พิมพ์
+                    </button>
+                )}
 
-              {/* 🛠️ แก้ไข: ปุ่มคืนเงิน - แสดงเมื่อเป็น Admin เท่านั้น */}
-              {isAdmin && (
-                <button
-                  onClick={handleRefund}
-                  className="min-w-[140px] h-11 px-5 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
-                  disabled={busy || sale.status === "REFUNDED" || sale.status === "VOID"}
-                  title="คืนเงิน"
-                >
-                  💸 คืนเงิน
-                </button>
-              )}
+                {/* คืนเงิน */}
+                {isAdmin && isActionable && (
+                    <button
+                        onClick={handleRefund}
+                        className="min-w-[140px] h-11 px-5 rounded-lg border hover:bg-gray-50 disabled:opacity-50"
+                        disabled={busy} 
+                        title="คืนเงิน"
+                    >
+                        💸 คืนเงิน
+                    </button>
+                )}
 
-              {/* 🛠️ แก้ไข: ปุ่มยกเลิกบิล - แสดงเมื่อเป็น Admin เท่านั้น */}
-              {isAdmin && (
-                <button
-                  onClick={handleVoid}
-                  className="min-w-[140px] h-11 px-5 rounded-lg bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
-                  disabled={busy || sale.status === "VOID"}
-                  title="ยกเลิกบิล"
-                >
-                  ✖️ ยกเลิกบิล
-                </button>
-              )}
+                {/* ยกเลิกบิล */}
+                {isAdmin && isActionable && (
+                    <button
+                        onClick={handleVoid}
+                        className="min-w-[140px] h-11 px-5 rounded-lg bg-red-600 text-white hover:opacity-90 disabled:opacity-50"
+                        disabled={busy}
+                        title="ยกเลิกบิล"
+                    >
+                        ✖️ ยกเลิกบิล
+                    </button>
+                )}
             </div>
             {busy && <div className="text-xs text-gray-500 mt-2 text-center">กำลังทำรายการ...</div>}
-          </div>
+        </div>
         </div>
       </div>
     </div>
