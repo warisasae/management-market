@@ -1,8 +1,8 @@
-// src/pages/UserForm.jsx                                                                                                                                           
+// src/pages/UserForm.jsx
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useOutletContext } from "react-router-dom"; 
+import { useNavigate, useParams, useOutletContext } from "react-router-dom";
 import { api } from "../lib/api";
-import { getCurrentUser, saveCurrentUser } from "../lib/auth"; 
+import { getCurrentUser, saveCurrentUser } from "../lib/auth";
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -69,8 +69,7 @@ export default function UserForm({ mode = "create" }) {
           setEmpName(u.name || "");
           setUsername(u.username || "");
           setRole((u.role || "USER").toUpperCase());
-          // ตรวจสอบว่า API คืน image_url หรือไม่
-          setImageUrl(u.image_url || ""); 
+          setImageUrl(u.image_url || "");
           setPassword("");
           setImgError(false);
         } else {
@@ -128,10 +127,9 @@ export default function UserForm({ mode = "create" }) {
     }
   };
 
-  const onSubmit = async (e) => {
+const onSubmit = async (e) => {
     e.preventDefault();
-    // อนุญาตให้แก้ไขรูปโปรไฟล์/รหัสผ่านโดยไม่กรอกชื่อผู้ใช้/ชื่อพนักงาน ถ้าเป็นการแก้ไขตัวเอง
-    if (!isSelfEdit && (!empName.trim() || !username.trim())) return; 
+    if (mode === "create" && (!empName.trim() || !username.trim())) return;
 
     try {
       setSaving(true);
@@ -140,56 +138,51 @@ export default function UserForm({ mode = "create" }) {
       const finalImageUrl = rawImage || (imageUrl ? imageUrl : null);
 
       if (isEdit || isSelfEdit) {
-        // ⭐️ FIX: เพิ่ม 'const' เพื่อประกาศตัวแปร 'updatePayload' (แก้ปัญหา 'updatePayload is not defined')
-        const updatePayload = { 
-            image_url: finalImageUrl,
-            // ในหน้า SelfEdit ไม่ควรอัปเดต role
-            role: isSelfEdit ? undefined : role, 
-            name: empName.trim() || undefined,
-            username: username.trim() || undefined,
+        // --- ส่วนที่แก้ไข ---
+        // 1. สร้าง Payload สำหรับอัปเดตข้อมูลทั้งหมดในที่เดียว
+        const updatePayload = {
+          image_url: finalImageUrl,
+          // ถ้าเป็น Admin (isEdit) ให้ส่งข้อมูลทั้งหมดไป
+          // ถ้าเป็น User (isSelfEdit) ไม่ต้องส่งข้อมูลเหล่านี้ (undefined)
+          role: isSelfEdit ? undefined : role,
+          name: isSelfEdit ? undefined : empName.trim(),
+          username: isSelfEdit ? undefined : username.trim(),
         };
 
+        // 2. เพิ่ม password เข้าไปใน payload เฉพาะเมื่อมีการกรอกข้อมูล
+        if (password && password.trim()) {
+          updatePayload.password = password.trim();
+        }
+
+        // 3. ยิง API แค่ครั้งเดียวเพื่ออัปเดตข้อมูลทั้งหมด
         const resProfile = await api.put(
           `/users/${encodeURIComponent(effectiveId)}`,
           updatePayload,
           { validateStatus: (s) => s >= 200 && s < 500 }
         );
+
+        // 4. จัดการ Error ที่อาจส่งมาจาก Backend (เช่น username ซ้ำ)
         if (resProfile.status < 200 || resProfile.status >= 300) {
-          throw new Error("อัปเดตข้อมูลไม่สำเร็จ");
+          const errorMsg = resProfile.data?.error || "อัปเดตข้อมูลไม่สำเร็จ";
+          throw new Error(errorMsg);
         }
 
-        if (password && password.trim()) {
-          const resPW = await api.put(
-            `/users/${encodeURIComponent(effectiveId)}/password`,
-            { password: password.trim() },
-            { validateStatus: (s) => s >= 200 && s < 500 }
-          );
-          if (resPW.status < 200 || resPW.status >= 300) {
-            throw new Error("เปลี่ยนรหัสผ่านไม่สำเร็จ");
-          }
-        }
+        // ❌ ไม่ต้องยิง API แยกสำหรับรหัสผ่านอีกต่อไป
 
         if (isSelfEdit) {
-          // สร้างข้อมูลผู้ใช้ที่อัปเดตแล้ว
-          const current = getCurrentUser(); 
+          const current = getCurrentUser();
           const updatedUser = {
             ...current,
-            // อัปเดตเฉพาะสิ่งที่เปลี่ยน
-            name: empName.trim() || current.name, 
-            username: username.trim() || current.username,
+            // อัปเดตเฉพาะรูปภาพใน Local Storage
             image_url: finalImageUrl,
           };
-          
-          // บันทึกเข้า Local Storage
-          saveCurrentUser(updatedUser); 
-
-          // แจ้ง Layout ให้อัปเดต State (ทำให้ Sidebar เรนเดอร์ใหม่)
+          saveCurrentUser(updatedUser);
           if (onUserUpdate) {
-             onUserUpdate(); 
+            onUserUpdate();
           }
         }
-      } else {
-        // ... (โค้ดการสร้างผู้ใช้ใหม่เหมือนเดิม)
+      } else { // Mode: create
+        // ส่วนนี้ไม่มีการเปลี่ยนแปลง
         if (!password.trim()) {
           alert("กรุณากรอกรหัสผ่านสำหรับผู้ใช้ใหม่");
           setSaving(false);
@@ -217,16 +210,12 @@ export default function UserForm({ mode = "create" }) {
       }
 
       setShowSaved(true);
-      
-      // ⭐️ FIX: หน่วงเวลาการ Redirect เพื่อแก้ปัญหา Race Condition (รูปเด้งกลับ)
       setTimeout(() => {
         setShowSaved(false);
-        
-        // หน่วงเวลาการ Redirect 100ms
         setTimeout(() => {
           const redirectPath = isSelfEdit ? "/dashboard" : "/dashboard/users";
           navigate(redirectPath, { replace: true });
-        }, 100); 
+        }, 100);
       }, 900);
     } catch (err) {
       alert(err?.message || "เกิดข้อผิดพลาด");
@@ -272,9 +261,10 @@ export default function UserForm({ mode = "create" }) {
               <input
                 value={empName}
                 onChange={(e) => setEmpName(e.target.value)}
-                disabled={isEdit && !isSelfEdit} // อนุญาตให้แก้ไขชื่อตัวเอง
+                // *** แก้ไข: ปิดการแก้ไขถ้าเป็น self-edit ***
+                disabled={isSelfEdit}
                 className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
-                  ${isEdit && !isSelfEdit
+                  ${isSelfEdit
                     ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
                     : "border border-gray-400"}`}
               />
@@ -286,6 +276,7 @@ export default function UserForm({ mode = "create" }) {
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
+                // *** แก้ไข: ปิดการแก้ไขถ้าเป็น self-edit ***
                 disabled={isSelfEdit}
                 className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
                   ${isSelfEdit
@@ -303,9 +294,10 @@ export default function UserForm({ mode = "create" }) {
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                disabled={isEdit && !isSelfEdit} // อนุญาตให้แก้ไขชื่อผู้ใช้ตัวเอง
+                // *** แก้ไข: ปิดการแก้ไขถ้าเป็น self-edit ***
+                disabled={isSelfEdit}
                 className={`w-full h-11 px-3 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500
-                  ${isEdit && !isSelfEdit
+                  ${isSelfEdit
                     ? "bg-gray-100 text-gray-500 border border-gray-300 cursor-not-allowed"
                     : "border border-gray-400"}`}
               />
@@ -373,7 +365,7 @@ export default function UserForm({ mode = "create" }) {
             </button>
             <button
               type="button"
-              onClick={() => navigate(-1)} 
+              onClick={() => navigate(-1)}
               className="px-5 h-11 rounded-lg bg-red-600 text-white hover:bg-red-700 font-semibold"
             >
               ยกเลิก

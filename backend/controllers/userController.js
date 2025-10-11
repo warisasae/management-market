@@ -71,64 +71,48 @@ export async function getUser(req, res, next) {
  * PUT /api/users/:id
  * แก้ไขข้อมูลโปรไฟล์ทั่วไป (name, role, image_url)
  */
+// 👇 วางฟังก์ชัน updateUser ที่แก้ไขแล้วนี้ทับของเดิม
 export async function updateUser(req, res, next) {
     try {
-        const { name, role, image_url } = req.body;
+        // 1. รับข้อมูลทั้งหมดจาก body
+        const { name, role, image_url, username, password } = req.body;
 
-        const updated = await prisma.user.update({
-            where: { user_id: req.params.id },
-            data: {
-                ...(name !== undefined ? { name } : {}),
-                ...(role !== undefined ? { role } : {}),
-                ...(image_url !== undefined ? { image_url } : {}),
-            },
-            select: { user_id: true, username: true, name: true, role: true, image_url: true }
-        });
+        // 2. สร้าง object data ที่จะอัปเดตแบบ Dynamic
+        const dataToUpdate = {};
 
-        res.json(updated);
-    } catch (e) { handlePrismaError(e, res, next); }
-}
-
-/**
- * PUT /api/users/:id/username
- * เปลี่ยน username (unique)
- */
-export async function updateUsername(req, res, next) {
-    try {
-        const { username } = req.body;
-        if (!username) return res.status(400).json({ error: 'username required' });
-
-        const updated = await prisma.user.update({
-            where: { user_id: req.params.id },
-            data: { username },
-            select: { user_id: true, username: true, name: true, role: true, image_url: true }
-        });
-
-        res.json(updated);
-    } catch (e) { handlePrismaError(e, res, next); }
-}
-
-/**
- * PUT /api/users/:id/password
- * เปลี่ยนรหัสผ่าน 
- */
-export async function updatePassword(req, res, next) {
-    try {
-        const { password } = req.body;
-        if (!password) return res.status(400).json({ error: 'password required' });
-
-        // 🔑 การแก้ไขที่สำคัญ: HASH รหัสผ่านใหม่ก่อนบันทึก
-        const newHashedPassword = await bcrypt.hash(password, 10);
+        if (name !== undefined) dataToUpdate.name = name;
+        if (role !== undefined) dataToUpdate.role = role;
+        if (image_url !== undefined) dataToUpdate.image_url = image_url;
         
+        // 3. จัดการ username (ตรวจสอบว่าซ้ำหรือไม่)
+        if (username) {
+            const existingUser = await prisma.user.findFirst({
+                where: {
+                    username: username,
+                    NOT: { user_id: req.params.id },
+                },
+            });
+            if (existingUser) {
+                return res.status(409).json({ error: 'This username is already in use' });
+            }
+            dataToUpdate.username = username;
+        }
+
+        // 4. จัดการ password (Hash ก่อนบันทึก)
+        if (password) {
+            dataToUpdate.password = await bcrypt.hash(password, 10);
+        }
+
+        // 5. อัปเดตข้อมูลลงฐานข้อมูล
         const updated = await prisma.user.update({
             where: { user_id: req.params.id },
-            data: { password: newHashedPassword } // ใช้รหัสผ่านที่ Hash แล้ว
+            data: dataToUpdate,
+            select: { user_id: true, username: true, name: true, role: true, image_url: true }
         });
 
-        res.json({ user_id: updated.user_id, ok: true });
+        res.json(updated);
     } catch (e) { handlePrismaError(e, res, next); }
 }
-
 // DELETE /api/users/:id
 export async function deleteUser(req, res, next) {
     try {

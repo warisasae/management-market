@@ -3,149 +3,180 @@ import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 
-// ฟังก์ชันสำหรับสร้าง HTML ใบเสร็จอย่างง่าย (Simple Receipt HTML Generation)
-// **ฟังก์ชันนี้เหมือนเดิม**
-const generateReceiptHtml = (saleData) => {
-  const {
-    saleId,
-    dateTime,
-    cashierName,
-    items,
-    subTotal,
-    vatRate,
-    vatAmount,
-    grandTotal,
-    paymentMethod,
-  } = saleData;
-
-  // ฟังก์ชันช่วยจัดรูปแบบตัวเลขให้เป็นสกุลเงิน (ทศนิยม 2 ตำแหน่ง)
-  const formatCurrency = (num) => Number(num).toFixed(2);
-  const formatDate = (date) => new Date(date).toLocaleString("th-TH", {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).replace(/\//g, '/').replace(/,/g, '').replace(/(\d{4})/, (match) => `${Number(match) + 543}`); // แปลงปี พ.ศ.
-
-  // กำหนดรูปแบบวันที่/เวลาตามรูป (29/9/2568 01:03:38)
-  const formattedDateTime = formatDate(dateTime || new Date());
-
-  // กำหนดชื่อร้าน (Hardcode ตามรูป)
-  const storeName = "My Grocery";
-
-  // กำหนดเลข POS (Hardcode ตามรูป)
-  const posId = "SL00028";
-
-  // เนื้อหารายการสินค้า
-  const itemsHtml = items.map(item => `
-    <div style="display: flex; justify-content: space-between; padding-top: 5px;">
-      <span>${item.name || 'Product'} x${item.qty || 1}</span>
-      <span>฿${formatCurrency(item.totalPrice)}</span>
-    </div>
-  `).join('');
-
-  // **สำคัญ**: เราจะสร้างเฉพาะเนื้อหาใบเสร็จ (ไม่ใช่ HTML เต็มหน้า)
-  const receiptContent = `
-      <div id="print-receipt-area" style="font-family: monospace; font-size: 10pt; width: 80mm; padding: 0; margin: 0; line-height: 1.4;">
-        <div style="text-align: center; font-weight: bold; font-size: 12pt;">${storeName}</div>
-        <div style="text-align: center;">POS#${posId}</div>
-
-        <div style="border-top: 1px dashed #000; margin: 5px 0;"></div>
-        
-        ${itemsHtml}
-
-        <div style="border-top: 1px dashed #000; margin: 5px 0;"></div>
-
-        <div style="display: flex; justify-content: space-between;">
-          <span>ยอดรวม</span>
-          <span style="text-align: right;">฿${formatCurrency(subTotal)}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between;">
-          <span>VAT ${vatRate}%</span>
-          <span style="text-align: right;">฿${formatCurrency(vatAmount)}</span>
-        </div>
-        <div style="display: flex; justify-content: space-between; font-weight: bold;">
-          <span>ยอดสุทธิ</span>
-          <span style="text-align: right;">฿${formatCurrency(grandTotal)}</span>
-        </div>
-        
-        <div style="display: flex; justify-content: space-between;">
-          <span>ชำระโดย</span>
-          <span style="text-align: right;">${paymentMethod}</span>
-        </div>
-
-        <div style="border-top: 1px dashed #000; margin: 5px 0;"></div>
-
-        <div style="text-align: center;">#${posId} ${formattedDateTime}</div>
-        <div style="text-align: center;">พนักงาน: ${cashierName || 'พนักงาน'}</div>
-        <div style="text-align: center; font-weight: bold; margin-top: 5px;">ขอบคุณที่อุดหนุน</div>
-      </div>
-  `;
-  return receiptContent;
-};
-
-// *****************************************************************
-// **ฟังก์ชันสำหรับสั่งพิมพ์ใบเสร็จ (แบบไม่เปิดหน้าใหม่)**
-// *****************************************************************
+// =================================================================
+// ** ฟังก์ชันพิมพ์ใบเสร็จ (ฉบับแก้ไขล่าสุด) **
+// =================================================================
 const printReceipt = (saleData) => {
-  const receiptContent = generateReceiptHtml(saleData);
-  
-  // 1. สร้าง div ชั่วคราวเพื่อใส่เนื้อหาใบเสร็จ
-  const printArea = document.createElement('div');
-  printArea.id = 'print-receipt-container';
-  printArea.style.display = 'none'; // ซ่อนคอนเทนเนอร์หลัก
-
-  // 2. ใส่เนื้อหาใบเสร็จเข้าไป
-  printArea.innerHTML = receiptContent;
-  document.body.appendChild(printArea);
-
-  // 3. เตรียม CSS พิเศษสำหรับ Print
-  const style = document.createElement('style');
-  style.id = 'print-style';
-  style.innerHTML = `
-    /* ซ่อนทุกอย่างยกเว้นเนื้อหาใบเสร็จเมื่อพิมพ์ */
+  // 1. CSS ที่คุณต้องการทั้งหมดจะอยู่ในนี้
+  const receiptStyles = `
+    /* 1. สไตล์พื้นฐาน */
+    * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+    html, body {
+        width: 48mm;
+        background: #fff;
+        color: #0f172a;
+        font-family: monospace, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+        font-weight: normal;
+        font-variant-numeric: tabular-nums;
+    }
+    /* 2. สไตล์ .receipt */
+    .receipt {
+        width: 100%;
+        padding: 0 1mm 0 0;
+        box-shadow: none;
+        border: 0;
+    }
+    /* --- สไตล์สำหรับรายการสินค้า --- */
+    .item-name {
+        flex-grow: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-right: 12px;
+    }
+    .item-quantity {
+        flex-shrink: 0;
+        margin-right: 12px;
+    }
+    .item-price {
+        flex-shrink: 0;
+        text-align: right;
+    }
+    /* --- สไตล์ Utility Classes --- */
+    .border-dashed { border-top: 1px dashed #d1d5db; }
+    .text-center { text-align: center; }
+    .text-right { text-align: right; }
+    .text-sm { font-size: 10px; line-height: 1.4; }
+    .text-xs { font-size: 8px; line-height: 1.4; }
+    .font-bold { font-weight: 700; }
+    .mt-1 { margin-top: 4px; }
+    .mt-2 { margin-top: 8px; }
+    .mb-3 { margin-bottom: 12px; }
+    .space-y-1 > * + * { margin-top: 4px; }
+    .flex { display: flex; }
+    .justify-between { justify-content: space-between; }
+    /* 4. @page: การตั้งค่าหน้าพิมพ์ */
+    @page {
+        size: 48mm auto;
+        margin: 0;
+    }
     @media print {
-        body > * {
+        html, body, .receipt {
+            width: 48mm !important;
+            margin: 0 !important;
+            padding: 0 1mm 0 0 !important;
+        }
+        .print\\:hidden, .print\\:hidden * {
             display: none !important;
-        }
-        #print-receipt-container {
-            display: block !important;
-            position: absolute;
-            top: 0;
-            left: 0;
-            margin: 0;
-            padding: 10px; /* เพิ่ม padding เล็กน้อยเพื่อให้ไม่ติดขอบ */
-        }
-        @page { 
-            size: 80mm auto; 
-            margin: 0; 
         }
     }
   `;
-  document.head.appendChild(style);
 
-  // 4. สั่งพิมพ์
-  window.print();
+  // 2. ฟังก์ชันช่วยในการจัดรูปแบบข้อมูล
+  const formatNumber = (n) => (Number(n) || 0).toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
-  // 5. ล้าง DOM ทันทีหลังจากสั่งพิมพ์ (เพื่อคืนค่าหน้าเว็บปกติ)
-  // ใช้ setTimeout เพื่อให้เบราว์เซอร์มีเวลาจัดการคำสั่งพิมพ์
-  setTimeout(() => {
-    document.body.removeChild(printArea);
-    document.head.removeChild(style);
-  }, 500);
+  const formatDate = (dateStr) => {
+    try {
+      const date = new Date(dateStr);
+      const year = date.getFullYear() + 543;
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+    } catch {
+      return "";
+    }
+  };
+
+  // 3. สร้าง HTML ของใบเสร็จโดยใช้ Class ที่เรากำหนดใน CSS
+  const itemsHtml = saleData.items.map(it => `
+    <div class="flex text-sm">
+      <span class="item-name">${it.name}</span>
+      <span class="item-quantity">x${it.qty}</span>
+      <span class="item-price">${formatNumber(it.totalPrice)}</span>
+    </div>
+  `).join('');
+
+  const receiptHtml = `
+    <div class="receipt text-sm">
+      <div class="text-center">
+        <div class="font-bold">GROCERY STORE</div>
+        <div class="text-xs">POS#${saleData.saleId}</div>
+      </div>
+      <div class="border-dashed mt-2"></div>
+      <div class="mb-3 mt-2 space-y-1">
+        ${itemsHtml}
+      </div>
+      <div class="border-dashed"></div>
+      <div class="mt-2 space-y-1">
+        <div class="flex justify-between">
+          <span>ยอดรวม</span>
+          <span>${formatNumber(saleData.subTotal)}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>VAT ${saleData.vatRate}%</span>
+          <span>${formatNumber(saleData.vatAmount)}</span>
+        </div>
+        <div class="flex justify-between font-bold">
+          <span>ยอดสุทธิ</span>
+          <span>${formatNumber(saleData.grandTotal)}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>ชำระโดย</span>
+          <span>${saleData.paymentMethod}</span>
+        </div>
+      </div>
+      <div class="border-dashed mt-2"></div>
+      <div class="text-center text-xs mt-2 space-y-1">
+        <div>${formatDate(saleData.dateTime)}</div>
+        <div>พนักงาน: ${saleData.cashierName}</div>
+        <div className="mt-1">${saleData.receiptFooter}</div>
+      </div>
+    </div>
+  `;
+
+  // 4. สร้าง Iframe และสั่งพิมพ์
+  const iframe = document.createElement("iframe");
+  Object.assign(iframe.style, {
+    position: "fixed",
+    right: "0",
+    bottom: "0",
+    width: "0",
+    height: "0",
+    border: "0",
+  });
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document;
+  if (!doc) return;
+
+  doc.open();
+  doc.write(`<!doctype html><html><head><meta charset="utf-8"><style>${receiptStyles}</style></head><body>${receiptHtml}</body></html>`);
+  doc.close();
+
+  iframe.onload = () => {
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 200);
+    }, 80);
+  };
 };
 
-// *****************************************************************
-// **โค้ดส่วนอื่น ๆ เหมือนเดิม**
-// *****************************************************************
 
 export default function Checkout() {
   const navigate = useNavigate();
   const cashRef = useRef(null);
-
+  const [settings, setSettings] = useState(null); 
   // รับ payload จาก POS (sessionStorage)
   const payload = useMemo(() => {
     try {
@@ -174,7 +205,7 @@ export default function Checkout() {
   const [method, setMethod] = useState("");
   const [show, setShow] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saleResult, setSaleResult] = useState(null); 
+  const [saleResult, setSaleResult] = useState(null);
 
   const needCash = method === "เงินสด";
   const enoughCash = !needCash || (Number(cash) || 0) >= grand;
@@ -185,7 +216,21 @@ export default function Checkout() {
   useEffect(() => {
     if (needCash) cashRef.current?.focus();
   }, [needCash]);
+ useEffect(() => {
+    // ฟังก์ชันสำหรับดึงข้อมูลการตั้งค่า
+    const fetchSettings = async () => {
+      try {
+        const res = await api.get("/settings/basic");
+        if (res.data) {
+          setSettings(res.data);
+        }
+      } catch (error) {
+        console.error("Failed to fetch settings:", error);
+      }
+    };
 
+    fetchSettings();
+  }, []); // [] หมายถึงให้ทำงานแค่ครั้งเดียวตอนโหลด
   const getCashierName = useCallback(() => {
     try {
       const raw = localStorage.getItem("user");
@@ -198,7 +243,7 @@ export default function Checkout() {
 
   const completeTransaction = () => {
     setShow(false); // ปิด Modal
-    sessionStorage.removeItem("mm_checkout"); 
+    sessionStorage.removeItem("mm_checkout");
     navigate("/dashboard/pos");
   };
 
@@ -235,11 +280,11 @@ export default function Checkout() {
 
       // บันทึกการขายและรับ response
       const response = await api.post("/sales", dataPayload);
-      
+
       // ข้อมูลที่จำเป็นสำหรับการพิมพ์ใบเสร็จ
       const saleData = {
-        saleId: response.data?.sale_id || new Date().getTime(), 
-        dateTime: new Date().toISOString(), 
+        saleId: response.data?.sale_id || new Date().getTime(),
+        dateTime: new Date().toISOString(),
         cashierName,
         items: items.map(it => ({
             name: it.name,
@@ -250,14 +295,15 @@ export default function Checkout() {
         vatRate: vatRate,
         vatAmount: vat,
         grandTotal: grand,
-        paymentMethod: method === "PromptPay" ? "โอนเงิน" : method, 
+        paymentMethod: method === "PromptPay" ? "โอนเงิน" : method,
+        receiptFooter: settings?.receiptFooter || '** ขอบคุณที่ใช้บริการ **',
       };
 
-      setSaleResult(saleData); 
+      setSaleResult(saleData);
       setShow(true);
-      
+
       // เรียกฟังก์ชันพิมพ์ใบเสร็จอัตโนมัติ
-      printReceipt(saleData); 
+      printReceipt(saleData);
 
     } catch (e) {
       console.error(e);
