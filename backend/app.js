@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple"; // 👈 Import ถูกต้อง
+import connectPgSimple from "connect-pg-simple";
 import cookieParser from "cookie-parser";
 
 // ===== Routes =====
@@ -30,7 +30,6 @@ import {
 const app = express();
 
 /** ---------- CORS ---------- */
-//  reverted to simple version
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 app.use(
@@ -48,12 +47,11 @@ app.use(cookieParser());
 /** ---------- Session ---------- */
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 
-// ⬇️ === FIX: เพิ่มบรรทัดนี้กลับเข้ามาครับ! === ⬇️
+// เพิ่มบรรทัดนี้กลับเข้ามา
 const PgSession = connectPgSimple(session);
-// ⬆️ ======================================= ⬆️
 
-// ⭐️ FIX: เปลี่ยนกลับไปเช็ก DATABASE_URL เท่านั้น
-const usePgStore = !!process.env.DATABASE_URL; 
+// กลับไปเช็ก DATABASE_URL เท่านั้น
+const usePgStore = !!process.env.DATABASE_URL;
 
 const sessionOptions = {
   name: "sid",
@@ -71,7 +69,7 @@ const sessionOptions = {
 
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
-  // ⭐️ FIX: ใช้ DATABASE_URL เท่านั้น
+  // ใช้ DATABASE_URL เท่านั้น
   sessionOptions.store = new PgSession({
     conString: process.env.DATABASE_URL,
     tableName: "session",
@@ -110,7 +108,11 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-autShed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes); // 👈 แก้ไข 'autShed' เป็น 'authed'
+
+// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed === ⬇️
+authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
+// ⬆️ ======================================== ⬆️
+
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
