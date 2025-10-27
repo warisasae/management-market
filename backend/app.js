@@ -22,17 +22,22 @@ import settingsProtected, { settingsPublic } from "./routes/settingRoutes.js";
 
 // ===== Auth middleware (ต้อง Import requireRole เข้ามาด้วย) =====
 // ตรวจสอบว่า requireRole ถูก export มาจาก authMiddleware.js แล้ว
-import { requireLogin, requireAdmin, requireRole } from "./middlewares/authMiddleware.js"; 
+import {
+  requireLogin,
+  requireAdmin,
+  requireRole,
+} from "./middlewares/authMiddleware.js";
 
 const app = express();
 
 /** ---------- CORS ---------- */
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || "http://localhost:5173";
+const FRONTEND_ORIGIN =
+  process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 app.use(
-	cors({
-		origin: FRONTEND_ORIGIN,
-		credentials: true, // ⭐️ ต้องเปิด เพื่อให้เบราว์เซอร์ส่ง cookie ข้ามพอร์ต/โดเมน
-	})
+  cors({
+    origin: FRONTEND_ORIGIN,
+    credentials: true, // ⭐️ ต้องเปิด เพื่อให้เบราว์เซอร์ส่ง cookie ข้ามพอร์ต/โดเมน
+  })
 );
 
 /** ---------- Common middlewares ---------- */
@@ -48,25 +53,25 @@ const PgSession = connectPgSimple(session);
 const usePgStore = !!process.env.DATABASE_URL;
 
 const sessionOptions = {
-	name: "sid", // ชื่อคุกกี้ของ session
-	secret: SESSION_SECRET,
-	resave: false,
-	saveUninitialized: false,
-	cookie: {
-		httpOnly: true,
-		secure: process.env.NODE_ENV === "production", // prod ใช้ https ค่อยเปิด
-		sameSite: "lax", // dev: 'lax' พอ (localhost:5173 ↔ 4000 ยังถือว่า same-site)
-		maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน
-		path: "/", // ให้ติดทุกเส้นทาง
-	},
+  name: "sid", // ชื่อคุกกี้ของ session
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production", // prod ใช้ https ค่อยเปิด
+    sameSite: "lax", // dev: 'lax' พอ (localhost:5173 ↔ 4000 ยังถือว่า same-site)
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน
+    path: "/", // ให้ติดทุกเส้นทาง
+  },
 };
 
 if (usePgStore) {
-	sessionOptions.store = new PgSession({
-		conString: process.env.DATABASE_URL,
-		tableName: "session",
-		createTableIfMissing: true,
-	});
+  sessionOptions.store = new PgSession({
+    conString: process.env.DATABASE_URL,
+    tableName: "session",
+    createTableIfMissing: true,
+  });
 }
 
 // ถ้าอยู่หลัง proxy/https (เช่น nginx) ควรเชื่อใจ proxy 1 ชั้น
@@ -75,15 +80,32 @@ app.set("trust proxy", 1);
 app.use(session(sessionOptions));
 
 /** ---------- Static & health ---------- */
-// ⭐️ แก้ไข: เปลี่ยนจาก "/uploads" เป็น "/upload" ให้ตรงกับ Frontend
-// ⭐️ บรรทัดนี้สำหรับรูปภาพเก่าที่เคยบันทึกไว้
-app.use("/uploads", express.static("uploads")); 
+
+// ⬇️ === FIX 1: เพิ่ม Route นี้สำหรับ Health Check ของ Render === ⬇️
+// นี่คือสิ่งที่ผมแนะนำในแชทที่แล้ว เพื่อแก้ 404 Not Found
+app.get("/", (_req, res) => {
+  res.status(200).send("OK: Management Market API is alive!");
+});
+// ⬆️ ========================================================= ⬆️
+
+// ⬇️ === FIX 2: คำเตือนสำคัญเกี่ยวกับไฟล์อัปโหลด === ⬇️
+// 🚨 บรรทัดนี้จะ "ไม่ทำงาน" บน Render ครับ
+// Render มี "ephemeral filesystem" (พื้นที่เก็บไฟล์ชั่วคราว)
+// หมายความว่าไฟล์ที่อัปโหลด (ในโฟลเดอร์ 'uploads') "จะหายไปทั้งหมด"
+// ทุกครั้งที่เซิร์ฟเวอร์ Restart (ซึ่งมันทำเองอัตโนมัติ)
+//
+// ✅ วิธีแก้ที่ถูกต้อง: คือใช้ "Supabase Storage" (ที่คุณมีบัญชีอยู่แล้ว)
+// เพื่อเก็บไฟล์ที่อัปโหลดถาวร ตามที่ผมแนะนำไปก่อนหน้านี้ครับ
+// 
+// app.use("/uploads", express.static("uploads"));
+// ⬆️ ================================================= ⬆️
+
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 /** ---------- Public routes (ไม่ต้องล็อกอิน) ---------- */
 app.use("/api/auth", authRoutes);
-app.use("/api/users", usersRoutes); 
+app.use("/api/users", usersRoutes);
 // settings ที่เป็น public (เช่น basic info)
 app.use("/api/settings", settingsPublic);
 // ถ้าอยากให้ dashboard เปิดสาธารณะให้คงเส้นนี้ไว้ (ถ้าอยากให้ต้องล็อกอิน ให้ย้ายไป authed แทน)
@@ -118,20 +140,19 @@ authed.use("/inventory", inventoryExtraRoutes);
 // mount under /api
 app.use("/api", authed);
 
-
 /** ---------- 404 handler (หลังจาก mount routes) ---------- */
 app.use((req, res, next) => {
-	if (req.path.startsWith("/api/")) {
-		return res.status(404).json({ error: "Not found" });
-	}
-	return next();
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+  return next();
 });
 
 /** ---------- Error handler ---------- */
 app.use((err, _req, res, _next) => {
-	console.error(err);
-	const status = err.status || 500;
-	res.status(status).json({ error: err.message || "Internal error" });
+  console.error(err);
+  const status = err.status || 500;
+  res.status(status).json({ error: err.message || "Internal error" });
 });
 
 export default app;
