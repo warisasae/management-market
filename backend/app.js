@@ -33,21 +33,17 @@ const app = express();
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 
-// ⬇️ === โค้ดใหม่สำหรับ DEBUG (Debug Code) === ⬇️
-// เราจะใช้ฟังก์ชันนี้แทน app.use(cors(...)) แบบเดิม
-const whitelist = [FRONTEND_ORIGIN]; // ใช้ตัวแปรจากข้างบน
+// ⬇️ === โค้ดสำหรับ DEBUG (Debug Code) === ⬇️
+const whitelist = [FRONTEND_ORIGIN];
 const corsOptions = {
-  credentials: true, // ⭐️ ต้องเปิด
+  credentials: true,
   origin: function (origin, callback) {
-    // พิมพ์ Log บอกเราว่า Origin ที่เข้ามาคืออะไร
     console.log(`[CORS DEBUG] Request Origin: ${origin}`);
 
     if (whitelist.indexOf(origin) !== -1 || !origin) {
-      // ถ้า Origin อยู่ใน whitelist (หรือเป็น "undefined" เช่นตอนเทส)
       console.log("[CORS DEBUG] Access Granted.");
       callback(null, true);
     } else {
-      // ถ้า Origin ไม่อยู่ใน whitelist (เช่น พิมพ์ผิด, มีช่องว่าง)
       console.log("[CORS DEBUG] Access Denied.");
       callback(new Error("Not allowed by CORS"));
     }
@@ -64,33 +60,28 @@ app.use(cookieParser());
 /** ---------- Session ---------- */
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 
-// ใช้ Postgres เป็น session store (ถ้ามี DATABASE_URL)
-const PgSession = connectPgSimple(session);
-// ⭐️ การแก้ไข: เราต้องตรวจสอบ DATABASE_URL หรือ PGHOST
-// เพื่อดูว่าควรใช้ PgSession หรือไม่
 const usePgStore =
   !!process.env.DATABASE_URL || !!process.env.PGHOST;
 
 const sessionOptions = {
-  name: "sid", // ชื่อคุกกี้ของ session
+  name: "sid",
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production", // prod ใช้ https ค่อยเปิด
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน
-    path: "/", // ให้ติดทุกเส้นทาง
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/",
   },
 };
 
 if (usePgStore) {
-  console.log("Using PostgreSQL for session storage."); // เพิ่ม Log
+  console.log("Using PostgreSQL for session storage.");
   const connectionConfig = process.env.DATABASE_URL
     ? { conString: process.env.DATABASE_URL }
     : {
-        // ใช้ตัวแปรแยกส่วน ถ้า DATABASE_URL ไม่มี
         host: process.env.PGHOST,
         port: process.env.PGPORT,
         user: process.env.PGUSER,
@@ -104,27 +95,21 @@ if (usePgStore) {
     createTableIfMissing: true,
   });
 } else {
-  // นี่คือคำเตือนที่คุณเห็นใน Log สีเหลือง
   console.warn(
     "Warning: Using MemoryStore for session. Not for production."
   );
 }
 
-// ถ้าอยู่หลัง proxy/https (เช่น nginx) ควรเชื่อใจ proxy 1 ชั้น
 app.set("trust proxy", 1);
-
 app.use(session(sessionOptions));
 
 /** ---------- Static & health ---------- */
 
-// Route สำหรับ Health Check ของ Render
 app.get("/", (_req, res) => {
   res.status(200).send("OK: Management Market API is alive!");
 });
 
-// 🚨 คำเตือนเกี่ยวกับไฟล์อัปโหลด
-// app.use("/uploads", express.static("uploads")); // ไม่ทำงานบน Render
-
+// app.use("/uploads", express.static("uploads"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -142,7 +127,11 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-autShed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
+
+// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed === ⬇️
+authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
+// ⬆️ ======================================== ⬆️
+
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
@@ -162,7 +151,7 @@ app.use((req, res, next) => {
 
 /** ---------- Error handler ---------- */
 app.use((err, _req, res, _next) => {
-  console.error(err); // พิมพ์ Error จริงๆ ออกมาใน Log ของ Render
+  console.error(err);
   const status = err.status || 500;
   res.status(status).json({ error: err.message || "Internal error" });
 });
