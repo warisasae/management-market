@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
+import connectPgSimple from "connect-pg-simple"; // 👈 (Import ยังอยู่)
 import cookieParser from "cookie-parser";
 
 // ===== Routes =====
@@ -60,6 +60,10 @@ app.use(cookieParser());
 /** ---------- Session ---------- */
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 
+// ⬇️ === FIX: เพิ่มบรรทัดนี้กลับเข้ามาครับ! === ⬇️
+const PgSession = connectPgSimple(session);
+// ⬆️ ======================================= ⬆️
+
 const usePgStore =
   !!process.env.DATABASE_URL || !!process.env.PGHOST;
 
@@ -89,6 +93,7 @@ if (usePgStore) {
         database: process.env.PGDATABASE,
       };
 
+  // ⬇️ ตอนนี้ 'PgSession' จะหาเจอแล้ว ⬇️
   sessionOptions.store = new PgSession({
     ...connectionConfig,
     tableName: "session",
@@ -127,11 +132,7 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-
-// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed === ⬇️
 authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
-// ⬆️ ======================================== ⬆️
-
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
@@ -157,4 +158,3 @@ app.use((err, _req, res, _next) => {
 });
 
 export default app;
-
