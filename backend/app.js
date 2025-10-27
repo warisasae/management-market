@@ -20,8 +20,7 @@ import backupRoutes from "./routes/backupRoutes.js";
 import inventoryExtraRoutes from "./routes/inventoryRoutes.js";
 import settingsProtected, { settingsPublic } from "./routes/settingRoutes.js";
 
-// ===== Auth middleware (ต้อง Import requireRole เข้ามาด้วย) =====
-// ตรวจสอบว่า requireRole ถูก export มาจาก authMiddleware.js แล้ว
+// ===== Auth middleware =====
 import {
   requireLogin,
   requireAdmin,
@@ -33,12 +32,29 @@ const app = express();
 /** ---------- CORS ---------- */
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "http://localhost:5173";
-app.use(
-  cors({
-    origin: FRONTEND_ORIGIN,
-    credentials: true, // ⭐️ ต้องเปิด เพื่อให้เบราว์เซอร์ส่ง cookie ข้ามพอร์ต/โดเมน
-  })
-);
+
+// ⬇️ === โค้ดใหม่สำหรับ DEBUG (Debug Code) === ⬇️
+// เราจะใช้ฟังก์ชันนี้แทน app.use(cors(...)) แบบเดิม
+const whitelist = [FRONTEND_ORIGIN]; // ใช้ตัวแปรจากข้างบน
+const corsOptions = {
+  credentials: true, // ⭐️ ต้องเปิด
+  origin: function (origin, callback) {
+    // พิมพ์ Log บอกเราว่า Origin ที่เข้ามาคืออะไร
+    console.log(`[CORS DEBUG] Request Origin: ${origin}`);
+
+    if (whitelist.indexOf(origin) !== -1 || !origin) {
+      // ถ้า Origin อยู่ใน whitelist (หรือเป็น "undefined" เช่นตอนเทส)
+      console.log("[CORS DEBUG] Access Granted.");
+      callback(null, true);
+    } else {
+      // ถ้า Origin ไม่อยู่ใน whitelist (เช่น พิมพ์ผิด, มีช่องว่าง)
+      console.log("[CORS DEBUG] Access Denied.");
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+};
+app.use(cors(corsOptions));
+// ⬆️ =================================== ⬆️
 
 /** ---------- Common middlewares ---------- */
 app.use(express.json({ limit: "5mb" }));
@@ -50,7 +66,10 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 
 // ใช้ Postgres เป็น session store (ถ้ามี DATABASE_URL)
 const PgSession = connectPgSimple(session);
-const usePgStore = !!process.env.DATABASE_URL;
+// ⭐️ การแก้ไข: เราต้องตรวจสอบ DATABASE_URL หรือ PGHOST
+// เพื่อดูว่าควรใช้ PgSession หรือไม่
+const usePgStore =
+  !!process.env.DATABASE_URL || !!process.env.PGHOST;
 
 const sessionOptions = {
   name: "sid", // ชื่อคุกกี้ของ session
@@ -60,18 +79,35 @@ const sessionOptions = {
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production", // prod ใช้ https ค่อยเปิด
-    sameSite: "lax", // dev: 'lax' พอ (localhost:5173 ↔ 4000 ยังถือว่า same-site)
+    sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน
     path: "/", // ให้ติดทุกเส้นทาง
   },
 };
 
 if (usePgStore) {
+  console.log("Using PostgreSQL for session storage."); // เพิ่ม Log
+  const connectionConfig = process.env.DATABASE_URL
+    ? { conString: process.env.DATABASE_URL }
+    : {
+        // ใช้ตัวแปรแยกส่วน ถ้า DATABASE_URL ไม่มี
+        host: process.env.PGHOST,
+        port: process.env.PGPORT,
+        user: process.env.PGUSER,
+        password: process.env.PGPASSWORD,
+        database: process.env.PGDATABASE,
+      };
+
   sessionOptions.store = new PgSession({
-    conString: process.env.DATABASE_URL,
+    ...connectionConfig,
     tableName: "session",
     createTableIfMissing: true,
   });
+} else {
+  // นี่คือคำเตือนที่คุณเห็นใน Log สีเหลือง
+  console.warn(
+    "Warning: Using MemoryStore for session. Not for production."
+  );
 }
 
 // ถ้าอยู่หลัง proxy/https (เช่น nginx) ควรเชื่อใจ proxy 1 ชั้น
@@ -81,24 +117,13 @@ app.use(session(sessionOptions));
 
 /** ---------- Static & health ---------- */
 
-// ⬇️ === FIX 1: เพิ่ม Route นี้สำหรับ Health Check ของ Render === ⬇️
-// นี่คือสิ่งที่ผมแนะนำในแชทที่แล้ว เพื่อแก้ 404 Not Found
+// Route สำหรับ Health Check ของ Render
 app.get("/", (_req, res) => {
   res.status(200).send("OK: Management Market API is alive!");
 });
-// ⬆️ ========================================================= ⬆️
 
-// ⬇️ === FIX 2: คำเตือนสำคัญเกี่ยวกับไฟล์อัปโหลด === ⬇️
-// 🚨 บรรทัดนี้จะ "ไม่ทำงาน" บน Render ครับ
-// Render มี "ephemeral filesystem" (พื้นที่เก็บไฟล์ชั่วคราว)
-// หมายความว่าไฟล์ที่อัปโหลด (ในโฟลเดอร์ 'uploads') "จะหายไปทั้งหมด"
-// ทุกครั้งที่เซิร์ฟเวอร์ Restart (ซึ่งมันทำเองอัตโนมัติ)
-//
-// ✅ วิธีแก้ที่ถูกต้อง: คือใช้ "Supabase Storage" (ที่คุณมีบัญชีอยู่แล้ว)
-// เพื่อเก็บไฟล์ที่อัปโหลดถาวร ตามที่ผมแนะนำไปก่อนหน้านี้ครับ
-// 
-// app.use("/uploads", express.static("uploads"));
-// ⬆️ ================================================= ⬆️
+// 🚨 คำเตือนเกี่ยวกับไฟล์อัปโหลด
+// app.use("/uploads", express.static("uploads")); // ไม่ทำงานบน Render
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
@@ -106,32 +131,19 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 /** ---------- Public routes (ไม่ต้องล็อกอิน) ---------- */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
-// settings ที่เป็น public (เช่น basic info)
 app.use("/api/settings", settingsPublic);
-// ถ้าอยากให้ dashboard เปิดสาธารณะให้คงเส้นนี้ไว้ (ถ้าอยากให้ต้องล็อกอิน ให้ย้ายไป authed แทน)
 app.use("/api/dashboard", dashboardRoutes);
 
 /** ---------- Protected routes (ต้องล็อกอิน) ---------- */
 const authed = express.Router();
-// กันทุก endpoint ใต้ /api/* ด้วย requireLogin
 authed.use(requireLogin);
 
 authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-
-// ************************************************************
-// 🎯 การแก้ไข: อนุญาตให้ ADMIN และ USER เข้าถึงสต็อกได้
-// ************************************************************
-// เปลี่ยน requireAdmin เป็น requireRole("ADMIN", "USER")
-authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
-
+autShed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
 authed.use("/expenses", expenseRoutes);
-
-// ถ้าต้องการให้ dashboard ต้องล็อกอิน ให้ใช้เส้นนี้แทน public ด้านบน แล้วลบทิ้งบรรทัด public
-// authed.use("/dashboard", dashboardRoutes);
-
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
 authed.use("/backup", backupRoutes);
@@ -150,9 +162,10 @@ app.use((req, res, next) => {
 
 /** ---------- Error handler ---------- */
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  console.error(err); // พิมพ์ Error จริงๆ ออกมาใน Log ของ Render
   const status = err.status || 500;
   res.status(status).json({ error: err.message || "Internal error" });
 });
 
 export default app;
+
