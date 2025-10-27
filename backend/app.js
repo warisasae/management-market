@@ -3,7 +3,7 @@ import express from "express";
 import cors from "cors";
 import morgan from "morgan";
 import session from "express-session";
-import connectPgSimple from "connect-pg-simple"; // 👈 (Import ยังอยู่)
+import connectPgSimple from "connect-pg-simple"; // 👈 Import ถูกต้อง
 import cookieParser from "cookie-parser";
 
 // ===== Routes =====
@@ -30,27 +30,15 @@ import {
 const app = express();
 
 /** ---------- CORS ---------- */
+//  reverted to simple version
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "http://localhost:5173";
-
-// ⬇️ === โค้ดสำหรับ DEBUG (Debug Code) === ⬇️
-const whitelist = [FRONTEND_ORIGIN];
-const corsOptions = {
-  credentials: true,
-  origin: function (origin, callback) {
-    console.log(`[CORS DEBUG] Request Origin: ${origin}`);
-
-    if (whitelist.indexOf(origin) !== -1 || !origin) {
-      console.log("[CORS DEBUG] Access Granted.");
-      callback(null, true);
-    } else {
-      console.log("[CORS DEBUG] Access Denied.");
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-};
-app.use(cors(corsOptions));
-// ⬆️ =================================== ⬆️
+app.use(
+  cors({
+    origin: FRONTEND_ORIGIN,
+    credentials: true,
+  })
+);
 
 /** ---------- Common middlewares ---------- */
 app.use(express.json({ limit: "5mb" }));
@@ -64,8 +52,8 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 const PgSession = connectPgSimple(session);
 // ⬆️ ======================================= ⬆️
 
-const usePgStore =
-  !!process.env.DATABASE_URL || !!process.env.PGHOST;
+// ⭐️ FIX: เปลี่ยนกลับไปเช็ก DATABASE_URL เท่านั้น
+const usePgStore = !!process.env.DATABASE_URL; 
 
 const sessionOptions = {
   name: "sid",
@@ -83,19 +71,9 @@ const sessionOptions = {
 
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
-  const connectionConfig = process.env.DATABASE_URL
-    ? { conString: process.env.DATABASE_URL }
-    : {
-        host: process.env.PGHOST,
-        port: process.env.PGPORT,
-        user: process.env.PGUSER,
-        password: process.env.PGPASSWORD,
-        database: process.env.PGDATABASE,
-      };
-
-  // ⬇️ ตอนนี้ 'PgSession' จะหาเจอแล้ว ⬇️
+  // ⭐️ FIX: ใช้ DATABASE_URL เท่านั้น
   sessionOptions.store = new PgSession({
-    ...connectionConfig,
+    conString: process.env.DATABASE_URL,
     tableName: "session",
     createTableIfMissing: true,
   });
@@ -132,7 +110,7 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
+autShed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes); // 👈 แก้ไข 'autShed' เป็น 'authed'
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
