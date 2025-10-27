@@ -46,12 +46,10 @@ app.use(cookieParser());
 
 /** ---------- Session ---------- */
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
-
-// เพิ่มบรรทัดนี้กลับเข้ามา
 const PgSession = connectPgSimple(session);
 
-// กลับไปเช็ก DATABASE_URL เท่านั้น
-const usePgStore = !!process.env.DATABASE_URL;
+// ⬇️ === FIX: เปลี่ยนไปเช็กตัวแปรใหม่ === ⬇️
+const usePgStore = !!process.env.SESSION_DATABASE_URL;
 
 const sessionOptions = {
   name: "sid",
@@ -69,9 +67,9 @@ const sessionOptions = {
 
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
-  // ใช้ DATABASE_URL เท่านั้น
+  // ⬇️ === FIX: เปลี่ยนไปใช้ตัวแปรใหม่ === ⬇️
   sessionOptions.store = new PgSession({
-    conString: process.env.DATABASE_URL,
+    conString: process.env.SESSION_DATABASE_URL, // 👈 ใช้ตัวแปรใหม่
     tableName: "session",
     createTableIfMissing: true,
   });
@@ -108,11 +106,7 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-
-// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed === ⬇️
 authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
-// ⬆️ ======================================== ⬆️
-
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
