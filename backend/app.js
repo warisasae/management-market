@@ -48,8 +48,8 @@ app.use(cookieParser());
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 const PgSession = connectPgSimple(session);
 
-// ⬇️ === FIX: เปลี่ยนไปเช็กตัวแปรใหม่ === ⬇️
-const usePgStore = !!process.env.SESSION_DATABASE_URL;
+// ⬇️ === FIX: กลับไปเช็ก DATABASE_URL เท่านั้น === ⬇️
+const usePgStore = !!process.env.DATABASE_URL;
 
 const sessionOptions = {
   name: "sid",
@@ -67,9 +67,9 @@ const sessionOptions = {
 
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
-  // ⬇️ === FIX: เปลี่ยนไปใช้ตัวแปรใหม่ === ⬇️
+  // ⬇️ === FIX: กลับไปใช้ DATABASE_URL เท่านั้น === ⬇️
   sessionOptions.store = new PgSession({
-    conString: process.env.SESSION_DATABASE_URL, // 👈 ใช้ตัวแปรใหม่
+    conString: process.env.DATABASE_URL, // 👈 ใช้ตัวแปรเดียวกับ Prisma
     tableName: "session",
     createTableIfMissing: true,
   });
