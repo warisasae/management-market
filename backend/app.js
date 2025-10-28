@@ -48,8 +48,9 @@ app.use(cookieParser());
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 const PgSession = connectPgSimple(session);
 
-// ⬇️ === FIX: กลับไปเช็ก DATABASE_URL เท่านั้น === ⬇️
-const usePgStore = !!process.env.DATABASE_URL;
+// ⬇️ === FIX: ใช้ตัวแปรแยกสำหรับ Session === ⬇️
+// PgSession จะใช้ตัวแปรนี้
+const usePgStore = !!process.env.SESSION_DATABASE_URL;
 
 const sessionOptions = {
   name: "sid",
@@ -67,9 +68,9 @@ const sessionOptions = {
 
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
-  // ⬇️ === FIX: กลับไปใช้ DATABASE_URL เท่านั้น === ⬇️
+  // ⬇️ FIX: ใช้ SESSION_DATABASE_URL ที่เป็น Direct Connection + SSL ⬇️
   sessionOptions.store = new PgSession({
-    conString: process.env.DATABASE_URL, // 👈 ใช้ตัวแปรเดียวกับ Prisma
+    conString: process.env.SESSION_DATABASE_URL, 
     tableName: "session",
     createTableIfMissing: true,
   });
@@ -88,7 +89,6 @@ app.get("/", (_req, res) => {
   res.status(200).send("OK: Management Market API is alive!");
 });
 
-// app.use("/uploads", express.static("uploads"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
@@ -106,7 +106,11 @@ authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
+
+// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed (Final Fix) === ⬇️
+authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes); 
+// ⬆️ ====================================================== ⬆️
+
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
