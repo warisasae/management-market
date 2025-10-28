@@ -56,7 +56,7 @@ const sessionOptions = {
   name: "sid",
   secret: SESSION_SECRET,
   resave: false,
-  saveUninitialized: false,
+  saveUninitialized: false, // สำคัญ: ตั้งเป็น false เมื่อไม่มี store ที่เชื่อถือได้ 100%
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -67,16 +67,18 @@ const sessionOptions = {
 };
 
 if (usePgStore) {
-  console.log("Using PostgreSQL for session storage.");
+  console.log("Using PostgreSQL for session storage via DATABASE_URL (Pooler).");
   // ⬇️ FIX: กลับไปใช้ DATABASE_URL (Pooler String) ⬇️
+  // แม้ PgSession อาจไม่รองรับ Pooler เต็มที่ แต่เราไม่มีทางเลือกอื่นเนื่องจาก IPv6
   sessionOptions.store = new PgSession({
-    conString: process.env.DATABASE_URL, 
+    conString: process.env.DATABASE_URL,
     tableName: "session",
-    createTableIfMissing: true,
+    createTableIfMissing: true, // ให้พยายามสร้างตาราง
   });
 } else {
+  // Fallback to MemoryStore if DATABASE_URL is somehow missing
   console.warn(
-    "Warning: Using MemoryStore for session. Not for production."
+    "Warning: DATABASE_URL not found. Using default MemoryStore for session. Not suitable for production!"
   );
 }
 
@@ -100,13 +102,13 @@ app.use("/api/dashboard", dashboardRoutes);
 
 /** ---------- Protected routes (ต้องล็อกอิน) ---------- */
 const authed = express.Router();
-authed.use(requireLogin);
+authed.use(requireLogin); // Middleware นี้จะเช็ก Session ก่อน
 
 authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
-authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes); 
+authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes);
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
 authed.use("/settings", settingsProtected);
@@ -126,9 +128,13 @@ app.use((req, res, next) => {
 
 /** ---------- Error handler ---------- */
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  console.error("Global Error Handler:", err); // เพิ่ม Log ให้ละเอียดขึ้น
   const status = err.status || 500;
-  res.status(status).json({ error: err.message || "Internal error" });
+  // ป้องกันการส่ง Headers ซ้ำซ้อน (จาก Error ก่อนหน้า)
+  if (!res.headersSent) {
+    res.status(status).json({ error: err.message || "Internal Server Error" });
+  }
 });
 
 export default app;
+
