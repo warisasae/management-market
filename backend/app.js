@@ -30,6 +30,7 @@ import {
 const app = express();
 
 /** ---------- CORS ---------- */
+// Frontend Origin (Vercel URL)
 const FRONTEND_ORIGIN =
   process.env.FRONTEND_ORIGIN || "http://localhost:5173";
 app.use(
@@ -49,7 +50,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 const PgSession = connectPgSimple(session);
 
 // ⬇️ === FIX: ใช้ตัวแปรแยกสำหรับ Session === ⬇️
-// PgSession จะใช้ตัวแปรนี้
+// PgSession จะใช้ตัวแปร SESSION_DATABASE_URL (ซึ่งเป็น Direct Connection)
 const usePgStore = !!process.env.SESSION_DATABASE_URL;
 
 const sessionOptions = {
@@ -69,6 +70,7 @@ const sessionOptions = {
 if (usePgStore) {
   console.log("Using PostgreSQL for session storage.");
   // ⬇️ FIX: ใช้ SESSION_DATABASE_URL ที่เป็น Direct Connection + SSL ⬇️
+  // เพื่อหลีกเลี่ยง ENETUNREACH/IPv6 Error
   sessionOptions.store = new PgSession({
     conString: process.env.SESSION_DATABASE_URL, 
     tableName: "session",
@@ -107,9 +109,7 @@ authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
 authed.use("/sales", saleRoutes);
 
-// ⬇️ === FIX: แก้ไขจาก autShed เป็น authed (Final Fix) === ⬇️
 authed.use("/stocks", requireRole("ADMIN", "USER"), stockRoutes); 
-// ⬆️ ====================================================== ⬆️
 
 authed.use("/expenses", expenseRoutes);
 authed.use("/uploads", uploadRoutes);
