@@ -16,11 +16,6 @@ export async function login(req, res, next) {
     let prisma; // ประกาศตัวแปร prisma ไว้ข้างนอก try/catch
 
     try {
-        // ⬇️ === เพิ่มโค้ด Debug === ⬇️
-        console.log('[DEBUG AUTH] DATABASE_URL before query:', process.env.DATABASE_URL);
-        prisma = new PrismaClient(); // 👈 สร้าง Client ใหม่ทุกครั้งที่ Login
-        // ⬆️ ===================== ⬆️
-
         // 2. ค้นหาผู้ใช้จากฐานข้อมูล
         const user = await prisma.user.findUnique({ where: { username } });
 
@@ -61,7 +56,6 @@ export async function login(req, res, next) {
         // ⬇️ === เพิ่มโค้ด Debug === ⬇️
         // ปิดการเชื่อมต่อ Prisma เสมอ ไม่ว่าจะสำเร็จหรือล้มเหลว
         if (prisma) {
-            await prisma.$disconnect();
             console.log("[DEBUG AUTH] Prisma disconnected.");
         }
         // ⬆️ ===================== ⬆️
