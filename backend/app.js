@@ -2,12 +2,11 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
-import session from "express-session"; // 👈 ยังคงใช้ session
-// import connectPgSimple from "connect-pg-simple"; // 🗑️ ลบ import นี้ออก
+import session from "express-session";
+// import connectPgSimple from "connect-pg-simple"; // ไม่ใช้แล้ว
 import cookieParser from "cookie-parser";
 
-// ===== Routes =====
-// ... (เหมือนเดิม) ...
+// ... Routes (เหมือนเดิม) ...
 import usersRoutes from "./routes/userRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
@@ -21,13 +20,13 @@ import backupRoutes from "./routes/backupRoutes.js";
 import inventoryExtraRoutes from "./routes/inventoryRoutes.js";
 import settingsProtected, { settingsPublic } from "./routes/settingRoutes.js";
 
-// ===== Auth middleware =====
-// ... (เหมือนเดิม) ...
+// ... Auth middleware (เหมือนเดิม) ...
 import {
   requireLogin,
   requireAdmin,
   requireRole,
 } from "./middlewares/authMiddleware.js";
+
 
 const app = express();
 
@@ -49,34 +48,29 @@ app.use(cookieParser());
 /** ---------- Session ---------- */
 const SESSION_SECRET = process.env.SESSION_SECRET || "dev-super-secret";
 
-// 🗑️ ลบโค้ด PgSession ทั้งหมดออก 🗑️
-// const PgSession = connectPgSimple(session);
-// const usePgStore = !!process.env.DATABASE_URL; // ไม่ต้องเช็กแล้ว
-
 const sessionOptions = {
   name: "sid",
   secret: SESSION_SECRET,
   resave: false,
-  saveUninitialized: false, // สำคัญ: ตั้งเป็น false เมื่อไม่มี store ที่เชื่อถือได้
+  saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 วัน
+    secure: process.env.NODE_ENV === "production", // ต้องเป็น true เมื่อ sameSite='none'
+    // ⬇️ === FIX: เปลี่ยนเป็น 'none' === ⬇️
+    sameSite: "none", // อนุญาต cookie ข้ามโดเมน (Vercel <-> Render)
+    // ⬆️ ============================= ⬆️
+    maxAge: 7 * 24 * 60 * 60 * 1000,
     path: "/",
   },
-  // 🗑️ ไม่ต้องกำหนด store แล้ว express-session จะใช้ MemoryStore อัตโนมัติ 🗑️
-  // store: undefined
+  // ใช้ MemoryStore (ค่าเริ่มต้น)
 };
-
-// 🗑️ ลบ if (usePgStore) {...} ออก 🗑️
 
 console.warn(
   "Using default MemoryStore for session. Not suitable for production!"
-); // เพิ่มคำเตือน
+);
 
-app.set("trust proxy", 1);
-app.use(session(sessionOptions)); // ใช้ options เดิม แต่ไม่มี store
+app.set("trust proxy", 1); // สำคัญสำหรับ secure cookie หลัง proxy
+app.use(session(sessionOptions));
 
 /** ---------- Static & health ---------- */
 // ... (เหมือนเดิม) ...
@@ -98,7 +92,7 @@ app.use("/api/dashboard", dashboardRoutes);
 /** ---------- Protected routes (ต้องล็อกอิน) ---------- */
 // ... (เหมือนเดิม) ...
 const authed = express.Router();
-authed.use(requireLogin); // Middleware นี้จะเช็ก Session ก่อน
+authed.use(requireLogin);
 authed.use("/users", usersRoutes);
 authed.use("/products", productRoutes);
 authed.use("/categories", categoryRoutes);
@@ -133,4 +127,3 @@ app.use((err, _req, res, _next) => {
 });
 
 export default app;
-
