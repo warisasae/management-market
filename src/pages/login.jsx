@@ -122,7 +122,7 @@ export default function Login() {
       {/* RIGHT: branding */}
       <div className="bg-[#FF6969] flex items-center justify-center px-6 py-10">
         <div className="text-center">
-          <img src="src/images/bell.jpg" alt="Logo" className="mx-auto w-[500px] mb-6" />
+          <img src="/images/bell.jpg" alt="Logo" className="mx-auto w-[500px] mb-6" />
           <div className="font-extrabold tracking-widest text-[56px] md:text-[72px] text-[#D9C44A]">
         ระฆังทอง
     </div>
