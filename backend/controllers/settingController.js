@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "../config/prisma.js";
 
 // ✅ เพิ่ม vatRate (ปรับเลขตามที่คุณใช้จริง เช่น 7)
 const DEFAULTS = {

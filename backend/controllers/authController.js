@@ -1,7 +1,9 @@
-// ⬇️ === FIX: เพิ่ม Import นี้กลับเข้ามา === ⬇️
-import { prisma } from "../lib/prisma.js"; // หรือ path ที่ถูกต้องของคุณ
-// ⬆️ ==================================== ⬆️
+import { prisma } from "../config/prisma.js"; // หรือ path ที่ถูกต้องของคุณ
 import bcrypt from "bcrypt";
+
+// ⬇️ === เพิ่มโค้ด Debug === ⬇️
+console.log('[DEBUG IMPORT] Value of prisma right after import:', prisma);
+// ⬆️ ===================== ⬆️
 
 /**
  * @description ฟังก์ชันสำหรับการเข้าสู่ระบบ (login)
@@ -14,7 +16,12 @@ export async function login(req, res, next) {
     }
 
     try {
-        // ✅ ตอนนี้ 'prisma' จะถูก Import มาจากข้างบนแล้ว
+        // เพิ่มการตรวจสอบก่อนใช้งาน
+        if (!prisma) {
+           console.error('[Login Error] Prisma instance is undefined before query!');
+           throw new Error('Prisma client is not available');
+        }
+
         const user = await prisma.user.findUnique({ where: { username } });
 
         if (!user) {
@@ -46,16 +53,9 @@ export async function login(req, res, next) {
         console.error("[Login Error]", e);
         next(e);
     }
-    // ไม่ต้องมี finally { prisma.$disconnect() } แล้ว เพราะเราใช้ shared instance
 }
 
-// ----------------------------------------------------------------------
-// โค้ดส่วน logout และ me (ไม่มีการแก้ไข)
-// ----------------------------------------------------------------------
-
-/**
- * @description ฟังก์ชันสำหรับการออกจากระบบ (logout)
- */
+// ... (โค้ด logout และ me เหมือนเดิม) ...
 export async function logout(req, res, next) {
     try {
         req.session.destroy((err) => {
@@ -74,9 +74,6 @@ export async function logout(req, res, next) {
     }
 }
 
-/**
- * @description ฟังก์ชันเช็คว่า user อยู่ใน session หรือไม่
- */
 export async function me(req, res) {
     const user = req.session?.user || null;
      console.log("[Me Check] Current session user:", user);

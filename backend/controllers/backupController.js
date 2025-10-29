@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "../config/prisma.js";
 
 export async function exportExcel(_req, res) {
   try {

@@ -1,4 +1,4 @@
-import { prisma } from "../lib/prisma.js";
+import { prisma } from "../config/prisma.js";
 
 export async function getExpiring(req, res) {
   const days = Number(req.query.days ?? 7);
