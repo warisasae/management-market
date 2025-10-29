@@ -11,7 +11,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const API_URL = import.meta.env.VITE_API_BASE || "http://localhost:4000/api";
 
 // แปลงเป็นค่าเงินไทย
 const THB = (n) =>
@@ -585,7 +585,5 @@ function Receipt({ form, update }) {
   );
 }
 
-
-/* --------------------------- UI primitives --------------------------- */
 
 
