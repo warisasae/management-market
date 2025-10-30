@@ -18,18 +18,18 @@ export async function createStockTx(req, res, next) {
 
     // ✅ ใช้ผู้ทำรายการจาก session เท่านั้น
     const actorId = req.user?.user_id;
-    if (!actorId) return res.status(401).json({ error: "unauthorized" });
+    if (!actorId) return res.status(401).json({ error: "ไม่ได้รับอนุญาต" });
 
     const type = normalizeChangeType(change_type);
     const qty = Number(quantity);
 
     if (!product_id || !type || !Number.isFinite(qty)) {
       return res.status(400).json({
-        error: "product_id, change_type(IN/OUT/ADJUST), quantity(number) required",
+        error: "ข้อมูลไม่ครบถ้วน (ต้องการ product_id, change_type: IN/OUT/ADJUST และ quantity ที่เป็นตัวเลข)",
       });
     }
     if (["IN", "OUT"].includes(type) && qty <= 0) {
-      return res.status(400).json({ error: "quantity must be > 0 for IN/OUT" });
+      return res.status(400).json({ error: "สำหรับประเภท IN หรือ OUT จำนวน (quantity) ต้องมากกว่า 0" });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -93,11 +93,11 @@ export async function createStockTx(req, res, next) {
     });
   } catch (e) {
     if (e.message === "product_not_found")
-      return res.status(404).json({ error: "product not found" });
-    if (e.message === "product_unavailable")
-      return res.status(400).json({ error: "Product is UNAVAILABLE" });
-    if (e.message === "insufficient_stock")
-      return res.status(400).json({ error: "Not enough stock" });
+      return res.status(404).json({ error: "ไม่พบสินค้านี้" });
+    if (e.message === "product_unavailable")
+      return res.status(400).json({ error: "สินค้า ยังไม่มีจำหน่าย" });
+    if (e.message === "insufficient_stock")
+      return res.status(400).json({ error: "สินค้าคงเหลือไม่เพียงพอ" });
     next(e);
   }
 }
@@ -129,7 +129,7 @@ export async function getStockTxById(req, res, next) {
         user: { select: { user_id: true, username: true, name: true } },
       },
     });
-    if (!row) return res.status(404).json({ error: "stock transaction not found" });
+    if (!row) return res.status(404).json({ error: "ไม่พบรายการสต็อกนี้" });
     res.json(row);
   } catch (e) {
     next(e);
