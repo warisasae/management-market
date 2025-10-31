@@ -153,7 +153,7 @@ export default function Stocks() {
         return;
       }
       const change_type = form.type === "รับเข้า" ? "IN" : form.type === "เบิกออก" ? "OUT" : "ADJUST";
-      const qtyForServer = change_type === "OUT" ? -Math.abs(qtyNum) : Math.abs(qtyNum);
+      const qtyForServer = Math.abs(qtyNum);
       const payload = {
         product_id: product.product_id,
         change_type,
