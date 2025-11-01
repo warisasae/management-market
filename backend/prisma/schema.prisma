@@ -103,14 +103,6 @@ model StockTransaction {
   product     Product  @relation(fields: [product_id], references: [product_id])
 }
 
-model Expense {
-  expense_id String   @id @default(uuid()) @map("expense_id")
-  expense_name String
-  amount       Float
-  expense_date DateTime @default(now())
-  note         String?
-}
-
 model Setting {
   id         Int      @id @default(autoincrement())
   key        String   @unique
